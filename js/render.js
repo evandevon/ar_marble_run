@@ -155,7 +155,7 @@ export function drawScene(ctx, scale, s) {
       c.spin += 0.06;
       drawCoin(ctx, c.x, c.y + Math.sin(now / 300 + c.spin) * 2, c.r, c.spin);
     }
-    if (game.state !== 'dead') drawStickman(ctx, game.player, game.state, now);
+    if (game.state !== 'dead' && game.state !== 'over') drawStickman(ctx, game.player, game.state, now);
   }
 
   effects.draw(ctx);
@@ -167,9 +167,10 @@ export function drawScene(ctx, scale, s) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     const items = [];
+    if (Number.isFinite(game.maxLives)) items.push('❤️'.repeat(Math.max(0, game.lives)) + '🖤'.repeat(game.maxLives - Math.max(0, game.lives)));
     if (game.coinsTotal) items.push(`🪙 ${game.coinsTaken}/${game.coinsTotal}`);
     items.push(`⏱ ${game.seconds.toFixed(1)}s`);
-    if (game.deaths) items.push(`💥 ${game.deaths}`);
+    if (game.deaths && !Number.isFinite(game.maxLives)) items.push(`💥 ${game.deaths}`);
     const text = items.join('    ');
     const tw = ctx.measureText(text).width;
     ctx.fillStyle = 'rgba(20,22,28,0.72)';

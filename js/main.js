@@ -1,5 +1,5 @@
 import { computeHomography, warpImage } from './homography.js';
-import { detectLevel, DEFAULT_VISION } from './vision.js';
+import { detectLevel, sampleHue, DEFAULT_VISION } from './vision.js';
 import { Level, Game } from './platformer.js';
 import { Effects, Sfx } from './effects.js';
 import { WebcamSource, ImageSource, listCameras, loadImageFile, makeDemoDrawing } from './camera.js';
@@ -9,7 +9,8 @@ import { drawScene, buildCleanImage } from './render.js';
 const WORLD_W = 1000;
 const WORLD_H = 707;
 const SCAN_INTERVAL_MS = 120;
-const STORE_KEY = 'paper-platformer.calibration.v1';
+const STORE_KEY = 'paper-platformer.calibration.v2';
+const SETTINGS_KEY = 'paper-platformer.settings.v1';
 const STEP_MS = 1000 / 60;
 
 const $ = (id) => document.getElementById(id);
@@ -20,7 +21,10 @@ const app = {
   H: null,                // paper -> camera homography
   mode: 'build',          // build | play
   view: 'camera',         // camera | clean
-  vision: { ...DEFAULT_VISION },
+  vision: { ...DEFAULT_VISION, hues: { ...DEFAULT_VISION.hues } },
+  orient: { rotate: 0, flipH: false, flipV: false },
+  maxLives: 3,
+  teaching: null,         // marker type being taught, or null
   det: null,              // latest detection result
   game: null,
   start: { x: 80, y: 560 },
@@ -32,6 +36,25 @@ const app = {
   lastScan: 0,
 };
 app.paperCtx = app.paperCanvas.getContext('2d');
+
+// ---------------------------------------------------------------- settings
+function loadSettings() {
+  try {
+    const st = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+    if (!st) return;
+    if (st.orient) app.orient = { ...app.orient, ...st.orient };
+    if (st.hues) app.vision.hues = { ...app.vision.hues, ...st.hues };
+    if (st.lives) app.maxLives = st.lives === 'Infinity' ? Infinity : +st.lives;
+  } catch { /* storage unavailable */ }
+}
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      orient: app.orient, hues: app.vision.hues, lives: String(app.maxLives),
+    }));
+  } catch { /* storage unavailable */ }
+}
+loadSettings();
 
 // ---------------------------------------------------------------- screens
 const isActive = (id) => $(id).classList.contains('active');
@@ -52,6 +75,8 @@ function stopSource() {
 $('btn-screen').addEventListener('click', async () => {
   show('setup');
   $('step-camera').hidden = false;
+  $('camera-select').closest('.field').hidden = false;
+  $('btn-lock').hidden = false;
   await startWebcam();
 });
 
@@ -59,6 +84,7 @@ $('btn-demo').addEventListener('click', () => {
   const demo = makeDemoDrawing();
   app.source = new ImageSource(demo.canvas);
   app.start = demo.start;
+  updateOrientButtons();
   $('step-camera').hidden = true;
   setCorners(demo.corners);
   show('setup');
@@ -69,7 +95,10 @@ $('photo-input').addEventListener('change', async (e) => {
   if (!file) return;
   const img = await loadImageFile(file);
   app.source = new ImageSource(img);
-  $('step-camera').hidden = true;
+  $('step-camera').hidden = false;
+  $('camera-select').closest('.field').hidden = true;
+  $('btn-lock').hidden = true;
+  updateOrientButtons();
   setCorners([]);
   show('setup');
   e.target.value = '';
@@ -89,6 +118,8 @@ async function startWebcam(deviceId) {
       app.source = new WebcamSource($('video'));
     }
     await app.source.start(deviceId);
+    app.source.setOrientation(app.orient);
+    updateOrientButtons();
     status.textContent = '';
     await fillCameraList(deviceId);
     loadSavedCorners();
@@ -123,6 +154,30 @@ $('btn-lock').addEventListener('click', async () => {
   status.textContent = res.msg;
 });
 
+// ---------------------------------------------------------------- orientation
+function updateOrientButtons() {
+  const o = app.source?.orient || app.orient;
+  $('btn-fliph').setAttribute('aria-pressed', String(!!o.flipH));
+  $('btn-flipv').setAttribute('aria-pressed', String(!!o.flipV));
+  $('btn-rotate').textContent = `⟳ Rotate${o.rotate ? ` (${o.rotate}°)` : ''}`;
+}
+function changeOrientation(change) {
+  if (!app.source) return;
+  const o = { ...app.source.orient };
+  if (change === 'rotate') o.rotate = (o.rotate + 90) % 360;
+  if (change === 'flipH') o.flipH = !o.flipH;
+  if (change === 'flipV') o.flipV = !o.flipV;
+  app.source.setOrientation(o);
+  if (app.source.kind === 'webcam') { app.orient = o; saveSettings(); }
+  setCorners([]);            // the old corners no longer line up
+  loadSavedCorners();
+  resizeSetup();
+  updateOrientButtons();
+}
+$('btn-rotate').addEventListener('click', () => changeOrientation('rotate'));
+$('btn-fliph').addEventListener('click', () => changeOrientation('flipH'));
+$('btn-flipv').addEventListener('click', () => changeOrientation('flipV'));
+
 // ---------------------------------------------------------------- corners
 function orderCorners(pts) {
   const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
@@ -142,7 +197,8 @@ function setCorners(pts) {
 function loadSavedCorners() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    const ok = saved && saved.w === app.source.width && saved.h === app.source.height && saved.corners?.length === 4;
+    const ok = saved && app.source.kind === 'webcam' && saved.w === app.source.width && saved.h === app.source.height
+      && saved.corners?.length === 4 && JSON.stringify(saved.orient) === JSON.stringify(app.source.orient);
     $('btn-saved-corners').hidden = !ok;
     if (ok && app.corners.length === 0) {
       setCorners(saved.corners);
@@ -153,7 +209,9 @@ function loadSavedCorners() {
 function saveSetup() {
   if (app.source?.kind !== 'webcam') return;
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ w: app.source.width, h: app.source.height, corners: app.corners, start: app.start }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      w: app.source.width, h: app.source.height, orient: app.source.orient, corners: app.corners, start: app.start,
+    }));
   } catch { /* storage unavailable */ }
 }
 
@@ -203,7 +261,8 @@ setupCanvas.addEventListener('pointerup', () => {
 function drawSetup() {
   if (!app.source) return;
   const ctx = setupCtx;
-  ctx.drawImage(app.source.element, 0, 0, setupCanvas.width, setupCanvas.height);
+  if (setupCanvas.width !== app.source.width || setupCanvas.height !== app.source.height) resizeSetup();
+  ctx.drawImage(app.source.draw(), 0, 0, setupCanvas.width, setupCanvas.height);
   const scale = setupCanvas.width / (setupCanvas.getBoundingClientRect().width || 1);
   const cs = app.corners;
   if (cs.length >= 2) {
@@ -271,10 +330,11 @@ function setMode(mode) {
     : 'Draw, then press Play. Click the paper to move the start flag.';
   $('win').hidden = true;
   app.effects.clear();
+  stopTeaching();
   if (play) {
     app.sfx.ensure();
     scan(true);                       // one last look, then freeze the level
-    app.game = new Game(new Level(app.det, WORLD_W, WORLD_H), app.start);
+    app.game = new Game(new Level(app.det, WORLD_W, WORLD_H), app.start, app.maxLives);
     app.game.events.push({ type: 'spawn', x: app.game.player.x, y: app.game.player.y });
     if (!app.det.counts.goal) toast('No green goal yet. Draw one to win!', 3000);
   } else {
@@ -320,6 +380,56 @@ function toggleFullscreen() {
 $('sens').addEventListener('input', (e) => { app.vision.sensitivity = +e.target.value; scan(true); });
 $('sat').addEventListener('input', (e) => { app.vision.colourSat = +e.target.value; scan(true); });
 $('gap').addEventListener('input', (e) => { app.vision.gapFill = +e.target.value; scan(true); });
+
+$('lives').value = String(app.maxLives);
+$('lives').addEventListener('change', (e) => {
+  app.maxLives = e.target.value === 'Infinity' ? Infinity : +e.target.value;
+  saveSettings();
+  if (app.game) { app.game.maxLives = app.maxLives; restart(); }
+});
+
+// Teach colours: pick a type, then click a mark drawn in that colour.
+const TYPE_NAMES = { hazard: 'danger (red)', coin: 'coin (orange/yellow)', goal: 'goal (green)', bouncy: 'bouncy (blue)' };
+function paintTeachChips() {
+  document.querySelectorAll('[data-chip]').forEach((c) => {
+    c.style.background = `hsl(${app.vision.hues[c.dataset.chip]}, 80%, 45%)`;
+  });
+}
+function stopTeaching() {
+  app.teaching = null;
+  document.querySelectorAll('.teach-btn').forEach((b) => b.classList.remove('active'));
+  gameCanvas.classList.remove('teaching');
+}
+document.querySelectorAll('.teach-btn').forEach((btn) => btn.addEventListener('click', () => {
+  if (app.teaching === btn.dataset.type) { stopTeaching(); return; }
+  if (app.mode === 'play') setMode('build');
+  stopTeaching();
+  app.teaching = btn.dataset.type;
+  btn.classList.add('active');
+  gameCanvas.classList.add('teaching');
+  toast(`Click on something drawn in your ${TYPE_NAMES[app.teaching]} marker`, 4000);
+}));
+$('btn-reset-colours').addEventListener('click', () => {
+  app.vision.hues = { ...DEFAULT_VISION.hues };
+  saveSettings();
+  paintTeachChips();
+  scan(true);
+  toast('Colours reset');
+});
+function teachAt(x, y) {
+  const hue = sampleHue(app.det, x, y, 12);
+  if (hue === null) {
+    toast('No colour found there. Click right on the marker line, or lower the Colour slider.', 3500);
+    return;
+  }
+  const type = app.teaching;
+  app.vision.hues[type] = Math.round(hue);
+  saveSettings();
+  paintTeachChips();
+  stopTeaching();
+  scan(true);
+  toast(`Got it! That colour is now ${TYPE_NAMES[type].split(' ')[0]}.`);
+}
 
 // ---------------------------------------------------------------- input
 const keys = new Set();
@@ -394,6 +504,10 @@ document.addEventListener('fullscreenchange', () => setTimeout(resizeGame, 50));
 gameCanvas.addEventListener('pointerdown', (e) => {
   if (app.mode !== 'build') return;
   const r = gameCanvas.getBoundingClientRect();
+  if (app.teaching) {
+    teachAt(((e.clientX - r.left) / r.width) * WORLD_W, ((e.clientY - r.top) / r.height) * WORLD_H);
+    return;
+  }
   app.start = {
     x: Math.max(12, Math.min(WORLD_W - 12, ((e.clientX - r.left) / r.width) * WORLD_W)),
     y: Math.max(50, Math.min(WORLD_H - 4, ((e.clientY - r.top) / r.height) * WORLD_H)),
@@ -418,12 +532,22 @@ function toast(msg, ms = 2200) {
   toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
-function showWin() {
+function showEnd(kind) {
   const g = app.game;
-  if (!g || g.state !== 'won') return;
-  const parts = [`Time ${g.seconds.toFixed(1)}s`];
+  if (!g || g.state !== kind) return;
+  const won = kind === 'won';
+  const parts = [];
+  if (won) parts.push(`Time ${g.seconds.toFixed(1)}s`);
   if (g.coinsTotal) parts.push(`Coins ${g.coinsTaken}/${g.coinsTotal}`);
-  parts.push(g.deaths ? `${g.deaths} ${g.deaths === 1 ? 'try' : 'tries'} before this one` : 'First try!');
+  if (won) {
+    if (Number.isFinite(g.maxLives)) parts.push(g.deaths ? `${g.lives} ${g.lives === 1 ? 'life' : 'lives'} left` : 'No lives lost!');
+    else parts.push(g.deaths ? `${g.deaths} ${g.deaths === 1 ? 'fall' : 'falls'}` : 'First try!');
+  } else {
+    parts.push('Can you find a safer way?');
+  }
+  $('win-title').textContent = won ? 'Level complete! 🎉' : 'Out of lives!';
+  $('btn-again-label').textContent = won ? 'Play again' : 'Try again';
+  document.querySelector('.win-card').classList.toggle('over', !won);
   $('win-stats').textContent = parts.join(' · ');
   $('win').hidden = false;
 }
@@ -442,13 +566,14 @@ function frame(now) {
       acc -= STEP_MS;
       const input = readInput();
       if (app.game) {
-        const wasWon = app.game.state === 'won';
+        const before = app.game.state;
         app.game.update(input);
         for (const e of app.game.events) app.effects.handle(e, app.sfx);
         app.game.events.length = 0;
-        if (!wasWon && app.game.state === 'won') setTimeout(showWin, 900);
-        // Jump on the win screen = play again
-        if (app.game.state === 'won' && !$('win').hidden && input.jumpPressed) restart();
+        const after = app.game.state;
+        if (before !== after && (after === 'won' || after === 'over')) setTimeout(() => showEnd(after), after === 'won' ? 900 : 1100);
+        // Jump on the end screen = play again
+        if (!$('win').hidden && input.jumpPressed) restart();
       }
       app.effects.update();
     }
@@ -462,6 +587,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+paintTeachChips();
 
 // For debugging in the browser console.
 window.gameApp = app;

@@ -1,6 +1,9 @@
 // Video sources: a live webcam, a still photo, or a built-in demo drawing.
 // Every source exposes the same tiny interface:
-//   source.width, source.height, source.capture() -> ImageData of the current frame
+//   source.width, source.height  (after rotation)
+//   source.draw()    -> canvas holding the current, correctly oriented frame
+//   source.capture() -> ImageData of that frame
+//   source.setOrientation({ rotate: 0|90|180|270, flipH, flipV })
 
 export async function listCameras() {
   try {
@@ -11,14 +14,63 @@ export async function listCameras() {
   }
 }
 
-export class WebcamSource {
-  constructor(video) {
-    this.video = video;
-    this.stream = null;
+// Shared rotate / flip handling.
+class OrientedSource {
+  constructor() {
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+    this.orient = { rotate: 0, flipH: false, flipV: false };
+  }
+
+  get width() { return this.canvas.width; }
+  get height() { return this.canvas.height; }
+
+  // Raw (unrotated) size of the underlying image; set by subclasses.
+  get rawSize() { return { w: 1, h: 1 }; }
+  get rawElement() { return null; }
+
+  setOrientation(o) {
+    this.orient = { ...this.orient, ...o };
+    this.orient.rotate = ((this.orient.rotate % 360) + 360) % 360;
+    this.resize();
+  }
+
+  resize() {
+    const { w, h } = this.rawSize;
+    const sideways = this.orient.rotate === 90 || this.orient.rotate === 270;
+    this.canvas.width = sideways ? h : w;
+    this.canvas.height = sideways ? w : h;
+  }
+
+  draw() {
+    const { w, h } = this.rawSize;
+    const c = this.ctx;
+    const o = this.orient;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.translate(this.canvas.width / 2, this.canvas.height / 2);
+    c.rotate((o.rotate * Math.PI) / 180);
+    c.scale(o.flipH ? -1 : 1, o.flipV ? -1 : 1);
+    c.drawImage(this.rawElement, -w / 2, -h / 2, w, h);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    return this.canvas;
+  }
+
+  capture() {
+    this.draw();
+    return this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+  }
+}
+
+export class WebcamSource extends OrientedSource {
+  constructor(video) {
+    super();
+    this.video = video;
+    this.stream = null;
     this.kind = 'webcam';
   }
+
+  get rawSize() { return { w: this.video.videoWidth || 1, h: this.video.videoHeight || 1 }; }
+  get rawElement() { return this.video; }
 
   async start(deviceId) {
     this.stop();
@@ -31,17 +83,7 @@ export class WebcamSource {
     this.video.srcObject = this.stream;
     await this.video.play();
     await new Promise((r) => (this.video.videoWidth ? r() : (this.video.onloadedmetadata = r)));
-    this.canvas.width = this.video.videoWidth;
-    this.canvas.height = this.video.videoHeight;
-  }
-
-  get width() { return this.canvas.width; }
-  get height() { return this.canvas.height; }
-  get element() { return this.video; }
-
-  capture() {
-    this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
-    return this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+    this.resize();
   }
 
   // Freeze auto exposure / white balance so colours stay steady when hands
@@ -63,17 +105,6 @@ export class WebcamSource {
     }
   }
 
-  async unlockColours() {
-    const track = this.stream && this.stream.getVideoTracks()[0];
-    if (!track) return;
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    const adv = {};
-    if (caps.exposureMode && caps.exposureMode.includes('continuous')) adv.exposureMode = 'continuous';
-    if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('continuous')) adv.whiteBalanceMode = 'continuous';
-    if (caps.focusMode && caps.focusMode.includes('continuous')) adv.focusMode = 'continuous';
-    try { await track.applyConstraints({ advanced: [adv] }); } catch { /* ignore */ }
-  }
-
   stop() {
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     this.stream = null;
@@ -81,22 +112,23 @@ export class WebcamSource {
 }
 
 // A still image (a phone photo of a drawing, or the demo drawing).
-export class ImageSource {
+export class ImageSource extends OrientedSource {
   constructor(canvasOrImage) {
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = canvasOrImage.naturalWidth || canvasOrImage.width;
-    this.canvas.height = canvasOrImage.naturalHeight || canvasOrImage.height;
-    this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
-    this.ctx.drawImage(canvasOrImage, 0, 0);
-    this.frame = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+    super();
+    this.img = canvasOrImage;
     this.kind = 'image';
+    this.frame = null;
+    this.resize();
   }
-  get width() { return this.canvas.width; }
-  get height() { return this.canvas.height; }
-  get element() { return this.canvas; }
-  capture() { return this.frame; }
+  get rawSize() { return { w: this.img.naturalWidth || this.img.width, h: this.img.naturalHeight || this.img.height }; }
+  get rawElement() { return this.img; }
+  resize() { super.resize(); this.frame = null; }
+  draw() {
+    if (!this.frame) { super.draw(); this.frame = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height); }
+    return this.canvas;
+  }
+  capture() { this.draw(); return this.frame; }
   async lockColours() { return { ok: true, msg: 'Still image: nothing to lock.' }; }
-  async unlockColours() {}
   stop() {}
 }
 

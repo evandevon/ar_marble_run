@@ -64,6 +64,9 @@ export class Effects {
         this.ring(e.x, e.y - 20, '#e0157f', 40);
         this.burst(e.x, e.y - 20, { count: 12, speed: 2.5, colour: ['#e0157f', '#fff'], gravity: 0, life: 24 });
         break;
+      case 'gameover':
+        sfx.play('gameover');
+        break;
       case 'win':
         for (let i = 0; i < 4; i++) {
           this.burst(e.x, e.y, { count: 30, speed: 7 + i, colour: ['#2ecc71', '#ffb703', '#3a7bff', '#e0157f', '#fff'], gravity: 0.12, life: 90, shape: 'confetti', size: 5, spread: 1.6 });
@@ -169,6 +172,7 @@ export class Sfx {
       case 'bounce': this.tone(180, 720, 0.28, 'sine', 0.16); break;
       case 'coin': this.tone(990, 990, 0.07, 'square', 0.06); this.tone(1320, 1320, 0.18, 'square', 0.06, 0.07); break;
       case 'die': this.tone(500, 80, 0.45, 'sawtooth', 0.08); break;
+      case 'gameover': [392, 330, 262, 196].forEach((f, i) => this.tone(f, f * 0.97, 0.26, 'triangle', 0.1, 0.35 + i * 0.22)); break;
       case 'win': [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 0.18, 'square', 0.07, i * 0.11)); break;
     }
   }

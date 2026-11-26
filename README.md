@@ -19,7 +19,7 @@ Draw a level with whiteboard markers on paper (or a mini whiteboard). A webcam l
 1. **Build mode:** draw the level. The camera outlines what it sees in each colour. Click the paper to move the start flag. The dotted arcs show how far and high the character can jump.
 2. Press **Play** (or Enter). The level freezes and the stick figure appears.
 3. **← →** (or A/D) to run, **Space / ↑ / W** to jump. Hold jump for a higher jump. **R** restarts.
-4. Reach the green goal. Press **Build** to change the drawing and try again.
+4. Reach the green goal. You have 3 lives (change this under **Tune**). Press **Build** to change the drawing and try again.
 
 Game controllers work too: stick or d-pad to move, A to jump, Y to restart, Start to switch between Build and Play.
 
@@ -31,14 +31,16 @@ No camera? Try the built-in demo level, or a photo of a drawing.
 2. Mount the webcam above it, pointing straight down.
 3. Use even room light. Avoid a lamp directly above (glare) or strong shadows. Matte whiteboards reflect less than glossy ones.
 4. Open the site in Chrome or Edge, choose **Screen mode** and allow the camera.
-5. Press **Lock colours**, then click the four corners of the drawing area.
-6. Press **Start**. The setup is remembered for next time (**Use last setup**).
+5. If the preview is sideways, upside down or mirrored, use **Rotate** and **Flip** until it matches what you see looking at the paper.
+6. Press **Lock colours**, then click the four corners of the drawing area.
+7. Press **Start**. The setup is remembered for next time (**Use last setup**).
 
 Thick markers work best; pencil is ignored on purpose. If something is being missed, open **Tune**:
 
 - **Black ink:** raise if black lines are missed, lower if shadows become ground.
 - **Colour:** lower if faint colours (often yellow) are missed, raise if black lines pick up coloured edges.
 - **Join gaps:** joins small breaks in wobbly lines.
+- **Teach colours:** if a marker is detected as the wrong thing (for example a green read as bouncy), choose the colour it should be, then click on something drawn in that marker. The game remembers your markers on that computer.
 
 ## Other keys
 

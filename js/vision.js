@@ -13,6 +13,9 @@
 export const DEFAULT_VISION = {
   sensitivity: 0.62,  // black: darker than this fraction of paper brightness
   colourSat: 0.3,     // colours: minimum saturation to count as coloured ink
+  hueTolerance: 50,   // degrees a pixel's hue may be from the nearest marker colour
+  // Typical marker hues (degrees). "Teach colours" replaces these with your markers.
+  hues: { hazard: 2, coin: 32, goal: 135, bouncy: 222 },
   gapFill: 1,         // radius (detection px) used to join breaks in black lines
   minArea: 18,        // ignore specks smaller than this (detection px)
   margin: 4,          // ignore a thin border around the paper edge
@@ -148,13 +151,34 @@ function hueOf(r, g, b, max, chroma) {
   return h < 0 ? h + 360 : h;
 }
 
-// Which game type a marker hue becomes.
-function typeForHue(h) {
-  if (h >= 330 || h < 16) return 'hazard';   // red
-  if (h < 72) return 'coin';                  // orange / yellow
-  if (h < 165) return 'goal';                 // green
-  if (h < 290) return 'bouncy';               // blue (includes purple-ish blues)
-  return null;                                // pink / magenta: ignored
+const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+
+// Which game type a hue becomes: the nearest taught marker colour.
+function typeForHue(h, hues, tol) {
+  let best = null, bestD = tol;
+  for (const t in hues) {
+    const d = hueDist(h, hues[t]);
+    if (d < bestD) { bestD = d; best = t; }
+  }
+  return best;
+}
+
+// Average hue of coloured pixels near a world-space point (for teaching colours).
+export function sampleHue(det, x, y, radius = 10) {
+  const s = det.scale, r = Math.round(radius / s);
+  const cx = Math.round(x / s), cy = Math.round(y / s);
+  let sx = 0, sy = 0, n = 0;
+  for (let yy = cy - r; yy <= cy + r; yy++) {
+    for (let xx = cx - r; xx <= cx + r; xx++) {
+      if (xx < 0 || yy < 0 || xx >= det.w || yy >= det.h) continue;
+      const h = det.hueMap[yy * det.w + xx];
+      if (h < 0) continue;
+      sx += Math.cos((h * Math.PI) / 180); sy += Math.sin((h * Math.PI) / 180); n++;
+    }
+  }
+  if (n < 3) return null;
+  const h = (Math.atan2(sy, sx) * 180) / Math.PI;
+  return h < 0 ? h + 360 : h;
 }
 
 // ---------- main entry ----------
@@ -213,6 +237,7 @@ export function detectLevel(img, opts = {}) {
   // 3. Classify every pixel
   const raw = { solid: new Uint8Array(n), bouncy: new Uint8Array(n), hazard: new Uint8Array(n), goal: new Uint8Array(n), coin: new Uint8Array(n) };
   const anyColour = new Uint8Array(n);
+  const hueMap = new Float32Array(n).fill(-1);
   const m = o.margin;
   for (let y = m; y < h - m; y++) {
     for (let x = m; x < w - m; x++) {
@@ -224,8 +249,10 @@ export function detectLevel(img, opts = {}) {
       const b = Math.min(255, (B[i] / Math.max(lb, 0.6 * lb + 0.4 * paper[2], 1)) * 240);
       const max = Math.max(r, g, b), min = Math.min(r, g, b), chroma = max - min;
       const sat = max > 0 ? chroma / max : 0;
+      const hue = chroma > 20 && sat > 0.12 ? hueOf(r, g, b, max, chroma) : -1;
+      hueMap[i] = hue;
       if (max > 55 && chroma > 38 && sat > o.colourSat) {
-        const t = typeForHue(hueOf(r, g, b, max, chroma));
+        const t = typeForHue(hue, o.hues, o.hueTolerance);
         if (t) { raw[t][i] = 1; anyColour[i] = 1; }
       } else if (0.299 * r + 0.587 * g + 0.114 * b < 240 * o.sensitivity) {
         raw.solid[i] = 1;
@@ -242,6 +269,8 @@ export function detectLevel(img, opts = {}) {
   for (const t of ['bouncy', 'hazard', 'goal', 'coin']) cleaned[t] = close(andNot(raw[t], blackNear), w, h, 1);
   // A colour can't also be ground.
   cleaned.solid = andNot(cleaned.solid, cleaned.bouncy);
+  // Darker edges of orange coins can read as red: never let them become danger.
+  cleaned.hazard = andNot(cleaned.hazard, dilate(cleaned.coin, w, h, 3));
 
   // 5. Components per type
   const masks = {};
@@ -257,5 +286,5 @@ export function detectLevel(img, opts = {}) {
       if (t === 'coin') coins.push({ x: b.cx, y: b.cy, r: Math.max(9, Math.min(18, Math.sqrt(b.area / Math.PI))) });
     }
   }
-  return { w, h, scale: s, masks, outlines, coins, counts };
+  return { w, h, scale: s, masks, outlines, coins, counts, hueMap };
 }

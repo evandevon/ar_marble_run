@@ -30,9 +30,19 @@ export class Level {
     const { solid, bouncy, hazard, goal } = det.masks;
     this.block = solid.map((v, i) => (v || bouncy[i] ? 1 : 0));
     this.bouncy = bouncy;
-    this.hazard = hazard;
+    this.hazard = hazard.slice();
     this.goal = goal;
     this.coins = det.coins.map((c) => ({ ...c, taken: false, spin: Math.random() * 6 }));
+    // Coins are never dangerous, even if their edges looked red to the camera.
+    for (const c of this.coins) {
+      const r = (c.r + 8) / this.s;
+      const cx = c.x / this.s, cy = c.y / this.s;
+      for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(this.h - 1, Math.ceil(cy + r)); y++) {
+        for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(this.w - 1, Math.ceil(cx + r)); x++) {
+          if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) this.hazard[y * this.w + x] = 0;
+        }
+      }
+    }
   }
 
   // Does `mask` have ink anywhere inside this world-space rectangle?
@@ -181,11 +191,13 @@ export class Player {
 
 // One attempt at a level: player, coins, timer, win/lose.
 export class Game {
-  constructor(level, start) {
+  constructor(level, start, maxLives = 3) {
     this.level = level;
     this.start = { ...start };
+    this.maxLives = maxLives;   // Infinity for unlimited
+    this.lives = maxLives;
     this.player = new Player(start.x, start.y);
-    this.state = 'playing';  // playing | dead | won
+    this.state = 'playing';  // playing | dead | won | over
     this.frames = 0;
     this.deaths = 0;
     this.deadTimer = 0;
@@ -208,6 +220,7 @@ export class Game {
     this.level.coins.forEach((c) => (c.taken = false));
     this.frames = 0;
     this.deaths = 0;
+    this.lives = this.maxLives;
     this.state = 'playing';
     this.placeAtStart();
     this.events.push({ type: 'spawn', x: this.player.x, y: this.player.y });
@@ -226,6 +239,7 @@ export class Game {
       }
       return;
     }
+    if (this.state === 'over') return;
     if (this.state === 'won') {
       p.phase += 0.15;
       return;
@@ -249,8 +263,13 @@ export class Game {
     if (touchedDanger || p.y > L.H + 80) {
       this.state = 'dead';
       this.deaths++;
+      this.lives--;
       this.deadTimer = 50;
       ev.push({ type: 'die', x: p.x, y: Math.min(p.y, L.H) - PLAYER.h / 2, fell: !touchedDanger });
+      if (this.lives <= 0) {
+        this.state = 'over';
+        ev.push({ type: 'gameover' });
+      }
       return;
     }
 

@@ -62,6 +62,12 @@
           <select id="camera-select"></select>
         </label>
         <p class="hint">Point the camera straight down at the paper or whiteboard. Even light, no lamp right above.</p>
+        <div class="row orient" role="group" aria-label="Camera orientation">
+          <button id="btn-rotate" class="secondary" title="Rotate 90°">⟳ Rotate</button>
+          <button id="btn-fliph" class="secondary" aria-pressed="false" title="Mirror left–right">⇋ Flip</button>
+          <button id="btn-flipv" class="secondary" aria-pressed="false" title="Flip upside down">⇵ Flip</button>
+        </div>
+        <p class="hint small">Make the preview match what you see when you look at the paper.</p>
         <button id="btn-lock" class="secondary">Lock colours</button>
         <p class="status" id="lock-status" role="status"></p>
       </div>
@@ -91,7 +97,7 @@
           <h2 id="win-title">Level complete! 🎉</h2>
           <p class="win-stats" id="win-stats"></p>
           <div class="row center">
-            <button id="btn-again" class="primary">↻ Play again</button>
+            <button id="btn-again" class="primary">↻ <span id="btn-again-label">Play again</span></button>
             <button id="btn-tobuild" class="secondary">✎ Change the level</button>
           </div>
         </div>
@@ -126,6 +132,24 @@
           <label class="slider" title="Join small breaks in hand-drawn lines">Join gaps
             <input type="range" id="gap" min="0" max="4" step="1" value="1">
           </label>
+          <label class="slider">Lives
+            <select id="lives">
+              <option value="3" selected>3</option>
+              <option value="5">5</option>
+              <option value="Infinity">Unlimited</option>
+            </select>
+          </label>
+          <div class="teach">
+            <p class="teach-title">Teach colours</p>
+            <p class="hint small">Pick a colour, then click something drawn in that marker.</p>
+            <div class="teach-grid">
+              <button class="secondary teach-btn" data-type="hazard"><span class="chip" data-chip="hazard"></span>Danger</button>
+              <button class="secondary teach-btn" data-type="coin"><span class="chip" data-chip="coin"></span>Coins</button>
+              <button class="secondary teach-btn" data-type="goal"><span class="chip" data-chip="goal"></span>Goal</button>
+              <button class="secondary teach-btn" data-type="bouncy"><span class="chip" data-chip="bouncy"></span>Bouncy</button>
+            </div>
+            <button class="link" id="btn-reset-colours">Reset to standard colours</button>
+          </div>
         </div>
       </details>
       <button id="btn-view" class="secondary" title="C">View: Camera</button>
