@@ -42,7 +42,9 @@ export class Level {
     this.h = det.h;
     this.s = det.scale;
     const { solid, bouncy, hazard, goal } = det.masks;
-    this.block = solid.map((v, i) => (v || bouncy[i] ? 1 : 0));
+    // Only black ink is solid from every side. Trampolines are one-way: you can
+    // pass up (or sideways) through them, and only land on them from above.
+    this.block = solid;
     this.bouncy = bouncy;
     this.hazard = hazard.slice();
     this.goal = goal;
@@ -71,6 +73,12 @@ export class Level {
       for (let x = x0; x <= x1; x++) if (mask[row + x]) return true;
     }
     return false;
+  }
+
+  // Is there trampoline ink in the thin band from y0 down to y1 under the feet?
+  bouncyBand(x, y0, y1) {
+    const hw = PLAYER.w / 2;
+    return this.hits(this.bouncy, x - hw, y0, x + hw, y1);
   }
 
   blocked(x, y) {
@@ -209,20 +217,26 @@ export class Player {
     const wasOnGround = this.onGround;
     const steps = Math.ceil(Math.abs(this.vy));
     const step = steps ? this.vy / steps : 0;
-    let hitFloor = false;
+    let hitFloor = false, hitTrampoline = false;
     for (let i = 0; i < steps; i++) {
       const ny = this.y + step;
+      // Falling onto a trampoline: only if the feet are above it, not already inside it.
+      if (step > 0 && !level.bouncyBand(this.x, this.y - 2, this.y) && level.bouncyBand(this.x, ny - 1, ny)) {
+        hitTrampoline = true;
+        break;
+      }
       if (!level.blocked(this.x, ny)) { this.y = ny; continue; }
       if (step > 0) hitFloor = true;
       else { this.vy = 0; events.push({ type: 'bonk', x: this.x, y: this.y - PLAYER.h }); }
       break;
     }
     // Touching the floor counts as landing even if the fall ended exactly on it.
-    const onFloor = hitFloor || (this.vy >= 0 && level.blocked(this.x, this.y + 1));
+    const onTrampoline = hitTrampoline ||
+      (this.vy >= 0 && !level.bouncyBand(this.x, this.y - 2, this.y) && level.bouncyBand(this.x, this.y, this.y + 1));
+    const onFloor = onTrampoline || hitFloor || (this.vy >= 0 && level.blocked(this.x, this.y + 1));
     if (!onFloor) { this.onGround = false; return; }
 
-    const hw = PLAYER.w / 2;
-    if (level.hits(level.bouncy, this.x - hw, this.y, this.x + hw, this.y + 3)) {
+    if (onTrampoline) {
       const P = PLAYER;
       const heldThrough = this.heldAirborne && this.inputHeld;
       this.onGround = false;
