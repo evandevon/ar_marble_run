@@ -1,58 +1,72 @@
-# AR Marble Run
+# Paper Platformer
 
-Draw ramps on paper. A webcam looking down at the paper turns your drawing into a marble run, shown on the front screen.
+Draw a level with whiteboard markers on paper (or a mini whiteboard). A webcam looking down turns the drawing into a platform game, played by a stick figure on the front screen.
 
 **Play it:** https://evandevon.github.io/ar_marble_run/
 
-## Stage 1 (this version)
+## Marker colours
 
-- **Screen mode:** the marble rolls over the live camera view of the paper.
-- **Black lines become walls and ramps:** anything drawn in thick black marker (lines, curves, buckets, filled shapes, cut-outs) becomes solid.
-- **Build / Run:** in Build mode the camera keeps scanning and outlines what it sees in blue. Press **Run** to freeze the layout and drop the marble.
-- **No camera?** Use the built-in demo drawing, or a photo of a drawing.
+| Marker | Becomes |
+|---|---|
+| **Black** | Ground and walls. Any shape: lines, slopes, boxes, scribbles |
+| **Blue** | Bouncy trampoline |
+| **Red** | Danger (lava, spikes). Touch it and you restart |
+| **Green** | The goal. Touch it to win |
+| **Orange / yellow** | Coins. Draw dots |
 
-Coming next: coloured objects (bouncy, traps, goal, boosters), automatic corner detection, and Projector mode.
+## How to play
+
+1. **Build mode:** draw the level. The camera outlines what it sees in each colour. Click the paper to move the start flag. The dotted arcs show how far and high the character can jump.
+2. Press **Play** (or Enter). The level freezes and the stick figure appears.
+3. **← →** (or A/D) to run, **Space / ↑ / W** to jump. Hold jump for a higher jump. **R** restarts.
+4. Reach the green goal. Press **Build** to change the drawing and try again.
+
+Game controllers work too: stick or d-pad to move, A to jump, Y to restart, Start to switch between Build and Play.
+
+No camera? Try the built-in demo level, or a photo of a drawing.
 
 ## Classroom setup
 
-1. Tape an A3 (or A4) sheet of white paper flat on a desk.
-2. Mount the webcam above it, pointing straight down. A phone stand or desk lamp arm works.
-3. Use even room light. Avoid a lamp directly above (glare) or strong shadows.
+1. Tape a sheet of white paper (A3 is ideal) flat on a desk, or use a mini whiteboard.
+2. Mount the webcam above it, pointing straight down.
+3. Use even room light. Avoid a lamp directly above (glare) or strong shadows. Matte whiteboards reflect less than glossy ones.
 4. Open the site in Chrome or Edge, choose **Screen mode** and allow the camera.
-5. Press **Lock colours**, then click the four corners of the paper.
-6. Press **Start playing**. The setup is remembered for next time (**Use last setup**).
+5. Press **Lock colours**, then click the four corners of the drawing area.
+6. Press **Start**. The setup is remembered for next time (**Use last setup**).
 
-Thick felt markers work best. Pencil and thin pens are deliberately ignored.
+Thick markers work best; pencil is ignored on purpose. If something is being missed, open **Tune**:
 
-## Controls
+- **Black ink:** raise if black lines are missed, lower if shadows become ground.
+- **Colour:** lower if faint colours (often yellow) are missed, raise if black lines pick up coloured edges.
+- **Join gaps:** joins small breaks in wobbly lines.
 
-| Key / control | Action |
+## Other keys
+
+| Key | Action |
 |---|---|
-| Space or **Run / Stop** | Switch between Build and Run |
-| Click the paper | Move the drop point (pink) |
-| R or **Drop again** | Drop the marble again |
-| C or **View** | Camera view / clean view |
+| C | Camera view / clean view |
+| M | Sound on/off |
 | F | Fullscreen |
-| **Ink** slider | How dark a line must be to count. Raise it if lines are missed, lower it if shadows appear as walls |
-| **Join gaps** slider | Joins small breaks in wobbly hand-drawn lines |
+| Esc | Back to Build |
 
 ## How it works
 
 | File | Job |
 |---|---|
-| `js/camera.js` | Webcam, still photo and demo drawing sources |
-| `js/homography.js` | Flattens the angled camera view of the paper into a rectangle |
-| `js/vision.js` | Finds dark ink (adaptive to uneven light), joins gaps, traces each shape's outline |
-| `js/physics.js` | Turns outlines into static walls (Matter.js) and simulates the marble |
-| `js/render.js` | Draws the paper, outlines, drop point and marble |
-| `js/main.js` | Screens, setup, controls and the main loop |
+| `js/camera.js` | Webcam, still photo and demo-level sources |
+| `js/homography.js` | Flattens the angled camera view into a rectangle |
+| `js/vision.js` | Sorts every pixel into a marker colour (adjusting for uneven light), cleans edges, joins gaps |
+| `js/platformer.js` | Character physics against the ink, coins, danger and goal |
+| `js/stickman.js` | The animated stick figure |
+| `js/effects.js` | Particles and synthesised sound effects |
+| `js/render.js` | Draws everything |
+| `js/main.js` | Screens, setup, controls and the game loop |
+| `js/marble/` | The earlier marble-run prototype, parked for a possible physics mode |
 
 Everything runs in the browser. There is no server and nothing leaves the computer.
 
 ## Hosting
 
-The site is plain HTML/JS with no build step. To publish: repo **Settings → Pages → Deploy from a branch → `main` / root**. GitHub Pages serves over HTTPS, which browsers require for camera access.
+Plain HTML/JS with no build step. Publish with **Settings → Pages → Deploy from a branch → `main` / root**. GitHub Pages serves over HTTPS, which browsers require for camera access.
 
 To run locally: `python3 -m http.server` in this folder, then open http://localhost:8000.
-
-Physics by [Matter.js](https://brm.io/matter-js/) (MIT), included in `lib/`.

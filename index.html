@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AR Marble Run</title>
+  <title>Paper Platformer</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -12,27 +12,35 @@
   <!-- ============ START ============ -->
   <section id="start" class="screen active" aria-labelledby="title">
     <div class="start-inner">
-      <h1 id="title"><span class="marble" aria-hidden="true"></span> AR Marble Run</h1>
-      <p class="lede">Draw ramps on paper. The camera turns them into a marble run.</p>
+      <h1 id="title"><span class="logo" aria-hidden="true"></span> Paper Platformer</h1>
+      <p class="lede">Draw a level with markers. The camera turns it into a game you can play.</p>
+
+      <ul class="legend" aria-label="Marker colour key">
+        <li><span class="chip solid"></span><b>Black</b> ground</li>
+        <li><span class="chip bouncy"></span><b>Blue</b> bouncy</li>
+        <li><span class="chip hazard"></span><b>Red</b> danger</li>
+        <li><span class="chip goal"></span><b>Green</b> goal</li>
+        <li><span class="chip coin"></span><b>Orange / yellow</b> coins</li>
+      </ul>
 
       <div class="mode-cards">
         <button class="mode-card" id="btn-screen">
           <span class="mode-icon" aria-hidden="true">🖥️</span>
           <span class="mode-name">Screen mode</span>
-          <span class="mode-desc">Show the marble over the camera view on the front screen.</span>
+          <span class="mode-desc">Play over the camera view on the front screen.</span>
         </button>
         <button class="mode-card" disabled aria-disabled="true">
           <span class="mode-icon" aria-hidden="true">📽️</span>
           <span class="mode-name">Projector mode</span>
-          <span class="mode-desc">Project the marble onto the paper. <em>Coming in stage 2.</em></span>
+          <span class="mode-desc">Project the character onto the paper. <em>Coming later.</em></span>
         </button>
       </div>
 
       <div class="alt-sources">
         <span>No camera handy?</span>
-        <button class="link" id="btn-demo">Try the demo drawing</button>
+        <button class="link" id="btn-demo">Try the demo level</button>
         <span aria-hidden="true">·</span>
-        <label class="link" for="photo-input">Use a photo of a drawing</label>
+        <label class="link" for="photo-input" tabindex="0">Use a photo of a drawing</label>
         <input type="file" id="photo-input" accept="image/*" hidden>
       </div>
     </div>
@@ -53,14 +61,14 @@
         <label class="field">Camera
           <select id="camera-select"></select>
         </label>
-        <p class="hint">Point the camera straight down at the paper. Even light, no lamp right above.</p>
+        <p class="hint">Point the camera straight down at the paper or whiteboard. Even light, no lamp right above.</p>
         <button id="btn-lock" class="secondary">Lock colours</button>
         <p class="status" id="lock-status" role="status"></p>
       </div>
 
       <div class="step">
-        <h3><span class="num">2</span> Paper corners</h3>
-        <p class="hint">Click the four corners of the paper, in any order. Drag a dot to adjust it.</p>
+        <h3><span class="num">2</span> Corners</h3>
+        <p class="hint">Click the four corners of the drawing area, in any order. Drag a dot to adjust it.</p>
         <p class="corner-count" id="corner-count" role="status">0 of 4 corners</p>
         <div class="row">
           <button id="btn-reset-corners" class="secondary">Clear corners</button>
@@ -68,38 +76,65 @@
         </div>
       </div>
 
-      <button id="btn-play" class="primary big" disabled>Start playing →</button>
+      <button id="btn-play" class="primary big" disabled>Start →</button>
     </aside>
   </section>
 
-  <!-- ============ PLAY ============ -->
-  <section id="play" class="screen" aria-label="Marble run">
+  <!-- ============ GAME ============ -->
+  <section id="play" class="screen" aria-label="Game">
     <div class="stage" id="stage">
-      <canvas id="game-canvas" aria-label="Marble run. Click the paper to move the drop point."></canvas>
+      <canvas id="game-canvas" aria-label="Game. In build mode, click to move the start flag."></canvas>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+      <div class="win" id="win" hidden>
+        <div class="win-card" role="dialog" aria-labelledby="win-title">
+          <h2 id="win-title">Level complete! 🎉</h2>
+          <p class="win-stats" id="win-stats"></p>
+          <div class="row center">
+            <button id="btn-again" class="primary">↻ Play again</button>
+            <button id="btn-tobuild" class="secondary">✎ Change the level</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="toolbar" id="toolbar">
-      <button id="btn-run" class="primary run" title="Space">▶ Run</button>
-      <button id="btn-redrop" class="secondary" title="R" hidden>↻ Drop again</button>
+      <button id="btn-mode" class="primary run" title="Enter">▶ Play</button>
+      <button id="btn-restart" class="secondary" title="R" hidden>↻ Restart</button>
       <span class="mode-pill" id="mode-pill">BUILD</span>
-      <span class="shape-count" id="shape-count">0 shapes</span>
+      <span class="hint-inline" id="hint-inline">Draw, then press Play. Click the paper to move the start flag.</span>
 
       <div class="spacer"></div>
 
-      <label class="slider" title="How dark a line must be to count">Ink
-        <input type="range" id="sens" min="0.4" max="0.92" step="0.01" value="0.7">
-      </label>
-      <label class="slider" title="Join small breaks in hand-drawn lines">Join gaps
-        <input type="range" id="gap" min="0" max="4" step="1" value="1">
-      </label>
+      <ul class="legend mini" id="legend-mini" aria-label="Detected">
+        <li title="Ground"><span class="chip solid"></span><span id="n-solid">0</span></li>
+        <li title="Bouncy"><span class="chip bouncy"></span><span id="n-bouncy">0</span></li>
+        <li title="Danger"><span class="chip hazard"></span><span id="n-hazard">0</span></li>
+        <li title="Goal"><span class="chip goal"></span><span id="n-goal">0</span></li>
+        <li title="Coins"><span class="chip coin"></span><span id="n-coin">0</span></li>
+      </ul>
+
+      <details class="tune">
+        <summary>Tune</summary>
+        <div class="tune-panel">
+          <label class="slider" title="How dark a line must be to count as ground">Black ink
+            <input type="range" id="sens" min="0.4" max="0.9" step="0.01" value="0.62">
+          </label>
+          <label class="slider" title="How strong a colour must be to count">Colour
+            <input type="range" id="sat" min="0.15" max="0.6" step="0.01" value="0.3">
+          </label>
+          <label class="slider" title="Join small breaks in hand-drawn lines">Join gaps
+            <input type="range" id="gap" min="0" max="4" step="1" value="1">
+          </label>
+        </div>
+      </details>
       <button id="btn-view" class="secondary" title="C">View: Camera</button>
+      <button id="btn-sound" class="secondary" aria-pressed="true" title="M">🔊</button>
       <button id="btn-recal" class="secondary">Recalibrate</button>
       <button id="btn-full" class="secondary" title="F" aria-label="Fullscreen">⛶</button>
     </div>
   </section>
 
-  <script src="lib/matter.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

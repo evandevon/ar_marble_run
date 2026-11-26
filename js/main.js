@@ -1,36 +1,40 @@
 import { computeHomography, warpImage } from './homography.js';
-import { detectShapes, DEFAULT_VISION } from './vision.js';
-import { MarbleWorld, BALL_RADIUS } from './physics.js';
+import { detectLevel, DEFAULT_VISION } from './vision.js';
+import { Level, Game } from './platformer.js';
+import { Effects, Sfx } from './effects.js';
 import { WebcamSource, ImageSource, listCameras, loadImageFile, makeDemoDrawing } from './camera.js';
-import { drawScene } from './render.js';
+import { drawScene, buildCleanImage } from './render.js';
 
 // The game world is the flattened paper, in "paper pixels" (A-series ratio).
 const WORLD_W = 1000;
 const WORLD_H = 707;
 const SCAN_INTERVAL_MS = 120;
-const STORE_KEY = 'ar-marble-run.calibration.v1';
+const STORE_KEY = 'paper-platformer.calibration.v1';
+const STEP_MS = 1000 / 60;
 
 const $ = (id) => document.getElementById(id);
 
 const app = {
   source: null,
-  corners: [],            // paper corners in source (camera) pixels, ordered TL, TR, BR, BL
+  corners: [],            // drawing-area corners in camera pixels, ordered TL, TR, BR, BL
   H: null,                // paper -> camera homography
-  mode: 'build',          // build | run
+  mode: 'build',          // build | play
   view: 'camera',         // camera | clean
   vision: { ...DEFAULT_VISION },
-  shapes: [],
-  drop: { x: 90, y: 60 },
-  world: new MarbleWorld(WORLD_W, WORLD_H),
+  det: null,              // latest detection result
+  game: null,
+  start: { x: 80, y: 560 },
+  effects: new Effects(),
+  sfx: new Sfx(),
   paperImg: new ImageData(WORLD_W, WORLD_H),
   paperCanvas: Object.assign(document.createElement('canvas'), { width: WORLD_W, height: WORLD_H }),
+  cleanCanvas: document.createElement('canvas'),
   lastScan: 0,
-  stillSince: 0,
-  loopRunning: false,
 };
 app.paperCtx = app.paperCanvas.getContext('2d');
 
 // ---------------------------------------------------------------- screens
+const isActive = (id) => $(id).classList.contains('active');
 function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
   if (id === 'play') resizeGame();
@@ -54,6 +58,7 @@ $('btn-screen').addEventListener('click', async () => {
 $('btn-demo').addEventListener('click', () => {
   const demo = makeDemoDrawing();
   app.source = new ImageSource(demo.canvas);
+  app.start = demo.start;
   $('step-camera').hidden = true;
   setCorners(demo.corners);
   show('setup');
@@ -68,6 +73,9 @@ $('photo-input').addEventListener('change', async (e) => {
   setCorners([]);
   show('setup');
   e.target.value = '';
+});
+document.querySelector('label[for="photo-input"]').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('photo-input').click(); }
 });
 
 // ---------------------------------------------------------------- camera
@@ -117,7 +125,6 @@ $('btn-lock').addEventListener('click', async () => {
 
 // ---------------------------------------------------------------- corners
 function orderCorners(pts) {
-  // Sort around the centre, then start from the top-left-most point.
   const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
   const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
   const sorted = [...pts].sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
@@ -137,13 +144,16 @@ function loadSavedCorners() {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
     const ok = saved && saved.w === app.source.width && saved.h === app.source.height && saved.corners?.length === 4;
     $('btn-saved-corners').hidden = !ok;
-    if (ok && app.corners.length === 0) setCorners(saved.corners);
+    if (ok && app.corners.length === 0) {
+      setCorners(saved.corners);
+      if (saved.start) app.start = saved.start;
+    }
   } catch { /* storage unavailable */ }
 }
-function saveCorners() {
-  if (app.source.kind !== 'webcam') return;
+function saveSetup() {
+  if (app.source?.kind !== 'webcam') return;
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ w: app.source.width, h: app.source.height, corners: app.corners }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ w: app.source.width, h: app.source.height, corners: app.corners, start: app.start }));
   } catch { /* storage unavailable */ }
 }
 
@@ -152,7 +162,6 @@ $('btn-saved-corners').addEventListener('click', () => {
   try { setCorners(JSON.parse(localStorage.getItem(STORE_KEY)).corners); } catch { /* ignore */ }
 });
 
-// Setup canvas: click to add a corner, drag to move one.
 const setupCanvas = $('setup-canvas');
 const setupCtx = setupCanvas.getContext('2d');
 let dragging = -1;
@@ -227,11 +236,11 @@ function drawSetup() {
 
 $('btn-play').addEventListener('click', () => {
   setCorners(app.corners);
-  saveCorners();
+  saveSetup();
   const paper = [{ x: 0, y: 0 }, { x: WORLD_W, y: 0 }, { x: WORLD_W, y: WORLD_H }, { x: 0, y: WORLD_H }];
   app.H = computeHomography(paper, app.corners);
-  setMode('build');
   show('play');
+  setMode('build');
   scan(true);
 });
 
@@ -243,46 +252,65 @@ function scan(force = false) {
   const frame = app.source.capture();
   warpImage(frame, app.H, WORLD_W, WORLD_H, app.paperImg);
   app.paperCtx.putImageData(app.paperImg, 0, 0);
-  app.shapes = detectShapes(app.paperImg, app.vision).shapes;
-  $('shape-count').textContent = `${app.shapes.length} shape${app.shapes.length === 1 ? '' : 's'}`;
+  app.det = detectLevel(app.paperImg, app.vision);
+  buildCleanImage(app.det, app.cleanCanvas);
+  for (const t of ['solid', 'bouncy', 'hazard', 'goal', 'coin']) $('n-' + t).textContent = app.det.counts[t];
 }
 
-// ---------------------------------------------------------------- play controls
+// ---------------------------------------------------------------- modes
 function setMode(mode) {
   app.mode = mode;
-  const run = mode === 'run';
-  $('btn-run').textContent = run ? '■ Stop' : '▶ Run';
-  $('btn-run').classList.toggle('stop', run);
-  $('btn-redrop').hidden = !run;
-  $('mode-pill').textContent = run ? 'RUNNING' : 'BUILD';
-  $('mode-pill').classList.toggle('running', run);
-  if (run) {
-    scan(true);                       // one last look, then freeze the layout
-    app.world.setWalls(app.shapes);
-    dropBall();
+  const play = mode === 'play';
+  $('btn-mode').textContent = play ? '✎ Build' : '▶ Play';
+  $('btn-mode').classList.toggle('stop', play);
+  $('btn-restart').hidden = !play;
+  $('mode-pill').textContent = play ? 'PLAYING' : 'BUILD';
+  $('mode-pill').classList.toggle('running', play);
+  $('hint-inline').textContent = play
+    ? '← → to run · Space or ↑ to jump · R to restart'
+    : 'Draw, then press Play. Click the paper to move the start flag.';
+  $('win').hidden = true;
+  app.effects.clear();
+  if (play) {
+    app.sfx.ensure();
+    scan(true);                       // one last look, then freeze the level
+    app.game = new Game(new Level(app.det, WORLD_W, WORLD_H), app.start);
+    app.game.events.push({ type: 'spawn', x: app.game.player.x, y: app.game.player.y });
+    if (!app.det.counts.goal) toast('No green goal yet. Draw one to win!', 3000);
   } else {
-    app.world.clearBall();
-    toast('Build mode: draw, then press Run');
+    app.game = null;
   }
 }
-function dropBall() {
-  app.world.drop(app.drop.x, app.drop.y);
-  app.stillSince = 0;
+
+function restart() {
+  if (!app.game) return;
+  $('win').hidden = true;
+  app.effects.clear();
+  app.game.restart();
 }
 
-$('btn-run').addEventListener('click', () => setMode(app.mode === 'run' ? 'build' : 'run'));
-$('btn-redrop').addEventListener('click', dropBall);
-$('btn-view').addEventListener('click', toggleView);
-$('btn-recal').addEventListener('click', () => {
+const blurAfter = (fn) => (e) => { e.currentTarget.blur(); fn(); };
+$('btn-mode').addEventListener('click', blurAfter(() => setMode(app.mode === 'play' ? 'build' : 'play')));
+$('btn-restart').addEventListener('click', blurAfter(restart));
+$('btn-again').addEventListener('click', blurAfter(restart));
+$('btn-tobuild').addEventListener('click', blurAfter(() => setMode('build')));
+$('btn-view').addEventListener('click', blurAfter(toggleView));
+$('btn-sound').addEventListener('click', blurAfter(toggleSound));
+$('btn-recal').addEventListener('click', blurAfter(() => {
   setMode('build');
   show('setup');
   if (app.source?.kind === 'webcam') loadSavedCorners();
-});
-$('btn-full').addEventListener('click', toggleFullscreen);
+}));
+$('btn-full').addEventListener('click', blurAfter(toggleFullscreen));
 
 function toggleView() {
   app.view = app.view === 'camera' ? 'clean' : 'camera';
   $('btn-view').textContent = 'View: ' + (app.view === 'camera' ? 'Camera' : 'Clean');
+}
+function toggleSound() {
+  app.sfx.muted = !app.sfx.muted;
+  $('btn-sound').textContent = app.sfx.muted ? '🔇' : '🔊';
+  $('btn-sound').setAttribute('aria-pressed', String(!app.sfx.muted));
 }
 function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen();
@@ -290,45 +318,87 @@ function toggleFullscreen() {
 }
 
 $('sens').addEventListener('input', (e) => { app.vision.sensitivity = +e.target.value; scan(true); });
+$('sat').addEventListener('input', (e) => { app.vision.colourSat = +e.target.value; scan(true); });
 $('gap').addEventListener('input', (e) => { app.vision.gapFill = +e.target.value; scan(true); });
 
-document.addEventListener('keydown', (e) => {
-  if (!$('play').classList.contains('active')) return;
-  if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
-  if (e.code === 'Space') { e.preventDefault(); $('btn-run').click(); }
-  else if (e.key === 'r' || e.key === 'R') { if (app.mode === 'run') dropBall(); }
-  else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-  else if (e.key === 'c' || e.key === 'C') toggleView();
-});
+// ---------------------------------------------------------------- input
+const keys = new Set();
+let jumpQueued = false;
+const JUMP_KEYS = ['Space', 'ArrowUp', 'KeyW'];
+const GAME_KEYS = [...JUMP_KEYS, 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'KeyA', 'KeyD'];
 
-// Click the paper to move the drop point.
+document.addEventListener('keydown', (e) => {
+  if (!isActive('play')) return;
+  if (e.target.tagName === 'SELECT') return;
+  if (GAME_KEYS.includes(e.code)) e.preventDefault();
+  if (!keys.has(e.code) && JUMP_KEYS.includes(e.code)) jumpQueued = true;
+  keys.add(e.code);
+  if (e.repeat) return;
+  if (e.code === 'Enter') { e.preventDefault(); setMode(app.mode === 'play' ? 'build' : 'play'); }
+  else if (e.code === 'Escape' && app.mode === 'play') setMode('build');
+  else if (e.code === 'KeyR') restart();
+  else if (e.code === 'KeyF') toggleFullscreen();
+  else if (e.code === 'KeyC') toggleView();
+  else if (e.code === 'KeyM') toggleSound();
+});
+document.addEventListener('keyup', (e) => keys.delete(e.code));
+window.addEventListener('blur', () => keys.clear());
+
+// Gamepads: left stick / d-pad to move, A (or B) to jump, Start to switch modes.
+let padJumpWas = false, padStartWas = false, padRestartWas = false;
+function readInput() {
+  let left = keys.has('ArrowLeft') || keys.has('KeyA');
+  let right = keys.has('ArrowRight') || keys.has('KeyD');
+  let jumpHeld = JUMP_KEYS.some((k) => keys.has(k));
+  let jumpPressed = jumpQueued;
+  jumpQueued = false;
+  for (const pad of navigator.getGamepads ? navigator.getGamepads() : []) {
+    if (!pad) continue;
+    const ax = pad.axes[0] || 0;
+    const btn = (i) => pad.buttons[i]?.pressed;
+    if (ax < -0.35 || btn(14)) left = true;
+    if (ax > 0.35 || btn(15)) right = true;
+    const j = btn(0) || btn(1) || btn(12);
+    if (j) jumpHeld = true;
+    if (j && !padJumpWas) jumpPressed = true;
+    padJumpWas = j;
+    const st = btn(9);
+    if (st && !padStartWas) setMode(app.mode === 'play' ? 'build' : 'play');
+    padStartWas = st;
+    const rs = btn(3) || btn(8);
+    if (rs && !padRestartWas) restart();
+    padRestartWas = rs;
+  }
+  return { left, right, jumpHeld, jumpPressed };
+}
+
+// ---------------------------------------------------------------- canvas
 const gameCanvas = $('game-canvas');
 const gameCtx = gameCanvas.getContext('2d');
-let layout = { x: 0, y: 0, s: 1 };
+let canvasScale = 1;
 
 function resizeGame() {
-  const stage = $('stage');
-  const r = stage.getBoundingClientRect();
+  const r = $('stage').getBoundingClientRect();
   const s = Math.min(r.width / WORLD_W, r.height / WORLD_H);
   const dpr = window.devicePixelRatio || 1;
   gameCanvas.style.width = `${WORLD_W * s}px`;
   gameCanvas.style.height = `${WORLD_H * s}px`;
   gameCanvas.width = Math.round(WORLD_W * s * dpr);
   gameCanvas.height = Math.round(WORLD_H * s * dpr);
-  layout = { s: s * dpr };
+  canvasScale = s * dpr;
 }
-window.addEventListener('resize', () => { if ($('play').classList.contains('active')) resizeGame(); });
+window.addEventListener('resize', () => { if (isActive('play')) resizeGame(); });
 document.addEventListener('fullscreenchange', () => setTimeout(resizeGame, 50));
 
+// Click the paper (in build mode) to move the start flag.
 gameCanvas.addEventListener('pointerdown', (e) => {
+  if (app.mode !== 'build') return;
   const r = gameCanvas.getBoundingClientRect();
-  const x = ((e.clientX - r.left) / r.width) * WORLD_W;
-  const y = ((e.clientY - r.top) / r.height) * WORLD_H;
-  app.drop = {
-    x: Math.max(BALL_RADIUS, Math.min(WORLD_W - BALL_RADIUS, x)),
-    y: Math.max(BALL_RADIUS, Math.min(WORLD_H - BALL_RADIUS, y)),
+  app.start = {
+    x: Math.max(12, Math.min(WORLD_W - 12, ((e.clientX - r.left) / r.width) * WORLD_W)),
+    y: Math.max(50, Math.min(WORLD_H - 4, ((e.clientY - r.top) / r.height) * WORLD_H)),
   };
-  if (app.mode === 'run') dropBall();
+  saveSetup();
 });
 
 // Hide the toolbar in fullscreen when the mouse is idle.
@@ -336,9 +406,7 @@ let idleTimer;
 document.addEventListener('pointermove', () => {
   $('toolbar').classList.remove('hidden');
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    if (document.fullscreenElement) $('toolbar').classList.add('hidden');
-  }, 3000);
+  idleTimer = setTimeout(() => { if (document.fullscreenElement) $('toolbar').classList.add('hidden'); }, 3000);
 });
 
 let toastTimer;
@@ -350,43 +418,50 @@ function toast(msg, ms = 2200) {
   toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
+function showWin() {
+  const g = app.game;
+  if (!g || g.state !== 'won') return;
+  const parts = [`Time ${g.seconds.toFixed(1)}s`];
+  if (g.coinsTotal) parts.push(`Coins ${g.coinsTaken}/${g.coinsTotal}`);
+  parts.push(g.deaths ? `${g.deaths} ${g.deaths === 1 ? 'try' : 'tries'} before this one` : 'First try!');
+  $('win-stats').textContent = parts.join(' · ');
+  $('win').hidden = false;
+}
+
 // ---------------------------------------------------------------- main loop
 let last = performance.now();
+let acc = 0;
 function frame(now) {
-  const dt = now - last;
+  const dt = Math.min(100, now - last);
   last = now;
-  if ($('setup').classList.contains('active')) drawSetup();
-  if ($('play').classList.contains('active') && app.source) {
+  if (isActive('setup')) drawSetup();
+  if (isActive('play') && app.source) {
     if (app.mode === 'build') scan();
-    else {
-      const prevState = app.world.state;
-      app.world.step(dt);
-      if (app.world.state === 'lost' && prevState === 'running') toast('The marble left the paper! Press R to drop again.', 3500);
-      // Notice when the marble comes to rest.
-      const b = app.world.ball;
-      if (b && app.world.state === 'running') {
-        const speed = Math.hypot(b.velocity.x, b.velocity.y);
-        if (speed < 0.08) {
-          if (!app.stillSince) app.stillSince = now;
-          else if (now - app.stillSince > 2500) { toast('The marble stopped.', 2500); app.stillSince = Infinity; }
-        } else if (app.stillSince !== Infinity) app.stillSince = 0;
+    acc += dt;
+    while (acc >= STEP_MS) {
+      acc -= STEP_MS;
+      const input = readInput();
+      if (app.game) {
+        const wasWon = app.game.state === 'won';
+        app.game.update(input);
+        for (const e of app.game.events) app.effects.handle(e, app.sfx);
+        app.game.events.length = 0;
+        if (!wasWon && app.game.state === 'won') setTimeout(showWin, 900);
+        // Jump on the win screen = play again
+        if (app.game.state === 'won' && !$('win').hidden && input.jumpPressed) restart();
       }
+      app.effects.update();
     }
-    drawScene(gameCtx, layout.s, {
-      world: app.world,
-      shapes: app.shapes,
-      paper: app.paperCanvas,
-      view: app.view,
-      mode: app.mode,
-      drop: app.drop,
-      now,
-      W: WORLD_W,
-      H: WORLD_H,
+    drawScene(gameCtx, canvasScale, {
+      W: WORLD_W, H: WORLD_H,
+      paper: app.paperCanvas, clean: app.cleanCanvas,
+      view: app.view, mode: app.mode, det: app.det,
+      game: app.game, start: app.start, effects: app.effects, now,
     });
   }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-// Expose for debugging in the browser console.
-window.marbleApp = app;
+// For debugging in the browser console.
+window.gameApp = app;

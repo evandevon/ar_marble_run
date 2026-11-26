@@ -109,7 +109,7 @@ export function loadImageFile(file) {
   });
 }
 
-// A hand-drawn-looking test sheet so the game can be tried without a camera.
+// A hand-drawn-looking test level so the game can be tried without a camera.
 // Drawn slightly in perspective, on a grey "table", like a real camera view.
 export function makeDemoDrawing() {
   const W = 1280, H = 720;
@@ -140,27 +140,48 @@ export function makeDemoDrawing() {
     }
     p.stroke();
   };
-  wobbly([[60, 170], [430, 260]], 9);            // first ramp
-  wobbly([[560, 300], [940, 220]], 9);            // ramp back the other way
-  // a curve
-  const curve = [];
-  for (let a = 0; a <= 1; a += 0.1) curve.push([380 + a * 380, 430 + Math.sin(a * Math.PI) * 70]);
-  wobbly([[130, 360], [380, 430]], 8);
-  wobbly(curve, 8);
-  wobbly([[760, 430], [850, 400]], 8);
-  // bucket
-  wobbly([[300, 560], [320, 660], [470, 660], [490, 560]], 10);
-  // a filled blob (cut-out style)
-  p.fillStyle = '#1a1a1a';
-  p.beginPath();
-  p.ellipse(700, 600, 45, 28, 0.3, 0, Math.PI * 2);
-  p.fill();
-  // a broken line to show gap filling
-  wobbly([[600, 120], [660, 130]], 7);
-  wobbly([[664, 131], [720, 140]], 7);
-  // pencil-faint smudge that should be ignored
+  const INK = { black: '#161616', red: '#cf2e2e', blue: '#1f5fd1', green: '#1e9a4b', orange: '#f28a1c' };
+  const fillPoly = (pts, colour) => {
+    p.fillStyle = colour;
+    p.beginPath();
+    pts.forEach(([x, y], i) => (i ? p.lineTo(x + rand() * 2, y + rand() * 2) : p.moveTo(x, y)));
+    p.closePath();
+    p.fill();
+  };
+  const dot = (x, y, r, colour) => { p.fillStyle = colour; p.beginPath(); p.arc(x, y, r, 0, Math.PI * 2); p.fill(); };
+
+  p.strokeStyle = INK.black;
+  wobbly([[30, 600], [270, 600]], 10);               // starting ground
+  wobbly([[400, 598], [560, 568]], 10);              // gentle slope
+  wobbly([[730, 455], [920, 455]], 10);              // high ledge (reach it with the trampoline)
+  wobbly([[560, 375], [680, 375]], 10);
+  wobbly([[310, 315], [480, 315]], 10);
+  wobbly([[60, 255], [230, 255]], 10);               // goal ledge
+  wobbly([[920, 455], [925, 380]], 9);               // little wall at the ledge end
+
+  // Lava pit
+  const lava = [[285, 690]];
+  for (let x = 285; x <= 385; x += 10) lava.push([x, 655 + Math.sin(x / 9) * 5]);
+  lava.push([385, 690]);
+  fillPoly(lava, INK.red);
+  // Spikes
+  fillPoly([[378, 312], [387, 292], [396, 312], [405, 292], [414, 312]], INK.red);
+
+  // Trampoline
+  p.strokeStyle = INK.blue;
+  wobbly([[615, 640], [705, 640]], 13);
+
+  // Goal flag
+  p.strokeStyle = INK.green;
+  wobbly([[112, 250], [112, 170]], 7);
+  fillPoly([[112, 168], [165, 184], [112, 202]], INK.green);
+
+  // Coins
+  for (const [x, y] of [[335, 535], [790, 410], [850, 410], [396, 250]]) dot(x, y, 10, INK.orange);
+
+  // Faint pencil smudge that should be ignored
   p.fillStyle = 'rgba(0,0,0,0.08)';
-  p.fillRect(850, 600, 60, 30);
+  p.fillRect(820, 600, 70, 30);
 
   // Place the paper on a table, viewed at a slight angle.
   const out = document.createElement('canvas');
@@ -190,7 +211,7 @@ export function makeDemoDrawing() {
   shade.addColorStop(1, 'rgba(0,0,0,0.18)');
   c.fillStyle = shade;
   c.fillRect(0, 0, W, H);
-  return { canvas: out, corners };
+  return { canvas: out, corners, start: { x: 80, y: 560 } };
 }
 
 function lerpPt(a, b, t) {
