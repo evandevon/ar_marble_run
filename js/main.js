@@ -1,5 +1,5 @@
 import { computeHomography, warpImage } from './homography.js';
-import { detectLevel, sampleHue, DEFAULT_VISION } from './vision.js';
+import { detectLevel, sampleColours, typeAt, DEFAULT_VISION } from './vision.js';
 import { Level, Game } from './platformer.js';
 import { Effects, Sfx } from './effects.js';
 import { WebcamSource, ImageSource, listCameras, loadImageFile, makeDemoDrawing } from './camera.js';
@@ -21,10 +21,12 @@ const app = {
   H: null,                // paper -> camera homography
   mode: 'build',          // build | play
   view: 'camera',         // camera | clean
-  vision: { ...DEFAULT_VISION, hues: { ...DEFAULT_VISION.hues } },
+  vision: { ...DEFAULT_VISION, samples: [] },
   orient: { rotate: 0, flipH: false, flipV: false },
   maxLives: 3,
-  teaching: null,         // marker type being taught, or null
+  fixing: false,          // Fix colours mode
+  fixUndo: [],            // number of samples added by each fix, for undo
+  pendingFix: null,       // { x, y, samples } waiting for the teacher to choose a type
   det: null,              // latest detection result
   game: null,
   start: { x: 80, y: 560 },
@@ -43,14 +45,15 @@ function loadSettings() {
     const st = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
     if (!st) return;
     if (st.orient) app.orient = { ...app.orient, ...st.orient };
-    if (st.hues) app.vision.hues = { ...app.vision.hues, ...st.hues };
+    if (Array.isArray(st.samples)) app.vision.samples = st.samples;
+    if (st.colourMatch) app.vision.colourMatch = st.colourMatch;
     if (st.lives) app.maxLives = st.lives === 'Infinity' ? Infinity : +st.lives;
   } catch { /* storage unavailable */ }
 }
 function saveSettings() {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-      orient: app.orient, hues: app.vision.hues, lives: String(app.maxLives),
+      orient: app.orient, samples: app.vision.samples, colourMatch: app.vision.colourMatch, lives: String(app.maxLives),
     }));
   } catch { /* storage unavailable */ }
 }
@@ -330,7 +333,7 @@ function setMode(mode) {
     : 'Draw, then press Play. Click the paper to move the start flag.';
   $('win').hidden = true;
   app.effects.clear();
-  stopTeaching();
+  if (play) setFixing(false);
   if (play) {
     app.sfx.ensure();
     scan(true);                       // one last look, then freeze the level
@@ -378,7 +381,8 @@ function toggleFullscreen() {
 }
 
 $('sens').addEventListener('input', (e) => { app.vision.sensitivity = +e.target.value; scan(true); });
-$('sat').addEventListener('input', (e) => { app.vision.colourSat = +e.target.value; scan(true); });
+$('match').value = String(app.vision.colourMatch);
+$('match').addEventListener('input', (e) => { app.vision.colourMatch = +e.target.value; saveSettings(); scan(true); });
 $('gap').addEventListener('input', (e) => { app.vision.gapFill = +e.target.value; scan(true); });
 
 $('lives').value = String(app.maxLives);
@@ -388,48 +392,89 @@ $('lives').addEventListener('change', (e) => {
   if (app.game) { app.game.maxLives = app.maxLives; restart(); }
 });
 
-// Teach colours: pick a type, then click a mark drawn in that colour.
-const TYPE_NAMES = { hazard: 'danger (red)', coin: 'coin (orange/yellow)', goal: 'goal (green)', bouncy: 'bouncy (blue)' };
-function paintTeachChips() {
-  document.querySelectorAll('[data-chip]').forEach((c) => {
-    c.style.background = `hsl(${app.vision.hues[c.dataset.chip]}, 80%, 45%)`;
-  });
+// ---------------------------------------------------------------- fix colours
+// Click anything the camera got wrong and say what it should be. The colours
+// under the click become new examples for that type (or "ignore").
+const TYPE_LABEL = { solid: 'Ground', bouncy: 'Bouncy', hazard: 'Danger', goal: 'Goal', coin: 'Coin', ignore: 'Ignore' };
+const MAX_SAMPLES = 150;
+
+function setFixing(on) {
+  app.fixing = on;
+  if (on && app.mode === 'play') setMode('build');
+  $('btn-fix').setAttribute('aria-pressed', String(on));
+  $('fix-panel').hidden = !on;
+  gameCanvas.classList.toggle('fixing', on);
+  if (!on) hideFixMenu();
+  updateFixPanel();
 }
-function stopTeaching() {
-  app.teaching = null;
-  document.querySelectorAll('.teach-btn').forEach((b) => b.classList.remove('active'));
-  gameCanvas.classList.remove('teaching');
+function updateFixPanel() {
+  const n = app.fixUndo.length, total = app.vision.samples.length;
+  $('fix-count').textContent = total
+    ? `${total} colour example${total === 1 ? '' : 's'} saved on this computer${n ? ` (${n} fix${n === 1 ? '' : 'es'} this session)` : ''}.`
+    : 'No fixes yet. Using the standard marker colours.';
+  $('btn-fix-undo').disabled = !n;
+  $('btn-fix-reset').disabled = !total;
 }
-document.querySelectorAll('.teach-btn').forEach((btn) => btn.addEventListener('click', () => {
-  if (app.teaching === btn.dataset.type) { stopTeaching(); return; }
-  if (app.mode === 'play') setMode('build');
-  stopTeaching();
-  app.teaching = btn.dataset.type;
-  btn.classList.add('active');
-  gameCanvas.classList.add('teaching');
-  toast(`Click on something drawn in your ${TYPE_NAMES[app.teaching]} marker`, 4000);
-}));
-$('btn-reset-colours').addEventListener('click', () => {
-  app.vision.hues = { ...DEFAULT_VISION.hues };
-  saveSettings();
-  paintTeachChips();
-  scan(true);
-  toast('Colours reset');
-});
-function teachAt(x, y) {
-  const hue = sampleHue(app.det, x, y, 12);
-  if (hue === null) {
-    toast('No colour found there. Click right on the marker line, or lower the Colour slider.', 3500);
+function hideFixMenu() {
+  $('fix-menu').hidden = true;
+  app.pendingFix = null;
+}
+function openFixMenu(x, y, clientX, clientY) {
+  const samples = sampleColours(app.det, x, y, 12);
+  if (!samples) {
+    toast('That looks like blank paper. Click right on the marker line.', 3000);
     return;
   }
-  const type = app.teaching;
-  app.vision.hues[type] = Math.round(hue);
-  saveSettings();
-  paintTeachChips();
-  stopTeaching();
-  scan(true);
-  toast(`Got it! That colour is now ${TYPE_NAMES[type].split(' ')[0]}.`);
+  const current = typeAt(app.det, x, y, 12);
+  app.pendingFix = { samples };
+  $('fix-menu-title').textContent = current
+    ? `The camera thinks this is ${TYPE_LABEL[current]}. It should be…`
+    : 'The camera is ignoring this. It should be…';
+  document.querySelectorAll('#fix-menu [data-type]').forEach((b) =>
+    b.classList.toggle('current', b.dataset.type === (current || 'ignore')));
+  const menu = $('fix-menu');
+  menu.hidden = false;
+  const st = $('stage').getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = `${Math.min(st.width - mw - 8, Math.max(8, clientX - st.left + 12))}px`;
+  menu.style.top = `${Math.min(st.height - mh - 8, Math.max(8, clientY - st.top - 20))}px`;
+  menu.querySelector(`[data-type="${current === 'solid' ? 'bouncy' : 'solid'}"]`)?.focus();
 }
+function applyFix(type) {
+  const fix = app.pendingFix;
+  hideFixMenu();
+  if (!fix || type === 'cancel') return;
+  app.vision.samples.push(...fix.samples.map((c) => ({ ...c, type })));
+  app.fixUndo.push(fix.samples.length);
+  // Keep the newest examples if the list grows very long.
+  if (app.vision.samples.length > MAX_SAMPLES) app.vision.samples.splice(0, app.vision.samples.length - MAX_SAMPLES);
+  saveSettings();
+  scan(true);
+  updateFixPanel();
+  toast(type === 'ignore' ? 'Got it: that colour will be ignored.' : `Got it: that colour is now ${TYPE_LABEL[type]}.`);
+}
+document.querySelectorAll('#fix-menu [data-type]').forEach((b) =>
+  b.addEventListener('click', () => applyFix(b.dataset.type)));
+$('btn-fix').addEventListener('click', blurAfter(() => setFixing(!app.fixing)));
+$('btn-fix-done').addEventListener('click', () => setFixing(false));
+$('btn-fix-undo').addEventListener('click', () => {
+  const n = app.fixUndo.pop();
+  if (!n) return;
+  app.vision.samples.splice(app.vision.samples.length - n, n);
+  saveSettings();
+  scan(true);
+  updateFixPanel();
+  toast('Undone');
+});
+$('btn-fix-reset').addEventListener('click', () => {
+  if (!confirm('Forget all colour fixes on this computer and go back to the standard marker colours?')) return;
+  app.vision.samples = [];
+  app.fixUndo = [];
+  saveSettings();
+  scan(true);
+  updateFixPanel();
+  toast('Back to the standard marker colours');
+});
 
 // ---------------------------------------------------------------- input
 const keys = new Set();
@@ -445,6 +490,8 @@ document.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.repeat) return;
   if (e.code === 'Enter') { e.preventDefault(); setMode(app.mode === 'play' ? 'build' : 'play'); }
+  else if (e.code === 'Escape' && !$('fix-menu').hidden) hideFixMenu();
+  else if (e.code === 'Escape' && app.fixing) setFixing(false);
   else if (e.code === 'Escape' && app.mode === 'play') setMode('build');
   else if (e.code === 'KeyR') restart();
   else if (e.code === 'KeyF') toggleFullscreen();
@@ -504,8 +551,8 @@ document.addEventListener('fullscreenchange', () => setTimeout(resizeGame, 50));
 gameCanvas.addEventListener('pointerdown', (e) => {
   if (app.mode !== 'build') return;
   const r = gameCanvas.getBoundingClientRect();
-  if (app.teaching) {
-    teachAt(((e.clientX - r.left) / r.width) * WORLD_W, ((e.clientY - r.top) / r.height) * WORLD_H);
+  if (app.fixing) {
+    openFixMenu(((e.clientX - r.left) / r.width) * WORLD_W, ((e.clientY - r.top) / r.height) * WORLD_H, e.clientX, e.clientY);
     return;
   }
   app.start = {
@@ -580,14 +627,14 @@ function frame(now) {
     drawScene(gameCtx, canvasScale, {
       W: WORLD_W, H: WORLD_H,
       paper: app.paperCanvas, clean: app.cleanCanvas,
-      view: app.view, mode: app.mode, det: app.det,
+      view: app.view, mode: app.mode, det: app.det, fixing: app.fixing,
       game: app.game, start: app.start, effects: app.effects, now,
     });
   }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-paintTeachChips();
+updateFixPanel();
 
 // For debugging in the browser console.
 window.gameApp = app;

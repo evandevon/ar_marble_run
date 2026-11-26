@@ -23,7 +23,7 @@ export function buildCleanImage(det, canvas) {
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(det.w, det.h);
   const d = img.data;
-  for (const t of ['solid', 'bouncy', 'hazard', 'goal']) {
+  for (const t of ['solid', 'bouncy', 'hazard', 'goal', 'coin']) {
     const m = det.masks[t];
     const [r, g, b] = RGB[t];
     for (let i = 0; i < m.length; i++) if (m[i]) { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255; }
@@ -100,7 +100,7 @@ function drawJumpGuide(ctx, x, y) {
 }
 
 export function drawScene(ctx, scale, s) {
-  const { W, H, paper, clean, view, mode, det, game, start, effects, now } = s;
+  const { W, H, paper, clean, view, mode, det, game, start, effects, now, fixing } = s;
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.imageSmoothingEnabled = true;
 
@@ -111,6 +111,13 @@ export function drawScene(ctx, scale, s) {
     ctx.fillStyle = '#fbfaf6';
     ctx.fillRect(0, 0, W, H);
     ctx.drawImage(clean, 0, 0, W, H);
+  }
+
+  // Fix colours: tint everything the camera recognised, so mistakes stand out.
+  if (fixing && view === 'camera') {
+    ctx.globalAlpha = 0.6;
+    ctx.drawImage(clean, 0, 0, W, H);
+    ctx.globalAlpha = 1;
   }
 
   // 2. Build mode: outline what the camera sees, coloured by meaning

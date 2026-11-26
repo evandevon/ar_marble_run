@@ -6,48 +6,79 @@
 //   green          -> goal
 //   orange/yellow  -> coins
 //
+// Colours are matched to the nearest example colour: built-in marker colours plus
+// any fixes the teacher has made by clicking mistakes. That lets the game adapt
+// to different lighting and whatever markers a class has.
+//
 // Pipeline: average-downsample -> normalise against local paper colour ->
 //           classify each pixel -> clean up fringes -> join gaps ->
 //           connected components -> outlines, coins and per-type masks.
 
 export const DEFAULT_VISION = {
   sensitivity: 0.62,  // black: darker than this fraction of paper brightness
-  colourSat: 0.3,     // colours: minimum saturation to count as coloured ink
-  hueTolerance: 50,   // degrees a pixel's hue may be from the nearest marker colour
-  // Typical marker hues (degrees). "Teach colours" replaces these with your markers.
-  hues: { hazard: 2, coin: 32, goal: 135, bouncy: 222 },
+  colourMatch: 70,    // how far a colour may be from its nearest example and still count
   gapFill: 1,         // radius (detection px) used to join breaks in black lines
   minArea: 18,        // ignore specks smaller than this (detection px)
   margin: 4,          // ignore a thin border around the paper edge
   scale: 2,           // detection runs at 1/scale of the world resolution
+  samples: [],        // colour fixes from the teacher: [{ type, r, g, b }] (type may be 'ignore')
 };
 
 export const TYPES = ['solid', 'bouncy', 'hazard', 'goal', 'coin'];
 
+// Built-in examples of common whiteboard markers and textas, measured after the
+// paper has been normalised to white (240). Teacher fixes are added on top.
+const BUILT_IN = [
+  ['hazard', 205, 55, 55], ['hazard', 170, 45, 55], ['hazard', 225, 70, 95],
+  ['coin', 238, 140, 45], ['coin', 240, 170, 50], ['coin', 238, 215, 70],
+  ['goal', 45, 150, 75], ['goal', 35, 145, 125], ['goal', 110, 185, 70],
+  ['bouncy', 45, 85, 195], ['bouncy', 60, 95, 160], ['bouncy', 40, 130, 210],
+];
+
 // ---------- mask helpers ----------
 
+// Square dilation using running counts (cost doesn't grow with radius).
 function dilate(src, w, h, r) {
   if (r <= 0) return src;
+  if (src.indexOf(1) < 0) return new Uint8Array(w * h);   // nothing to grow
   const tmp = new Uint8Array(w * h);
   const out = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     const row = y * w;
+    let count = 0;
+    for (let x = 0; x < Math.min(r, w); x++) count += src[row + x];
     for (let x = 0; x < w; x++) {
-      const x0 = Math.max(0, x - r), x1 = Math.min(w - 1, x + r);
-      for (let k = x0; k <= x1; k++) if (src[row + k]) { tmp[row + x] = 1; break; }
+      if (x + r < w) count += src[row + x + r];
+      if (x - r - 1 >= 0) count -= src[row + x - r - 1];
+      tmp[row + x] = count > 0 ? 1 : 0;
     }
   }
+  // Vertical pass, row by row (cache friendly): keep a running count per column.
+  const col = new Int32Array(w);
+  for (let y = 0; y < Math.min(r, h); y++) for (let x = 0; x < w; x++) col[x] += tmp[y * w + x];
   for (let y = 0; y < h; y++) {
-    const y0 = Math.max(0, y - r), y1 = Math.min(h - 1, y + r);
+    const add = y + r < h ? (y + r) * w : -1;
+    const sub = y - r - 1 >= 0 ? (y - r - 1) * w : -1;
+    const row = y * w;
     for (let x = 0; x < w; x++) {
-      for (let k = y0; k <= y1; k++) if (tmp[k * w + x]) { out[y * w + x] = 1; break; }
+      if (add >= 0) col[x] += tmp[add + x];
+      if (sub >= 0) col[x] -= tmp[sub + x];
+      out[row + x] = col[x] > 0 ? 1 : 0;
     }
   }
   return out;
 }
-const invert = (m) => m.map((v) => (v ? 0 : 1));
-const close = (m, w, h, r) => (r <= 0 ? m : invert(dilate(invert(dilate(m, w, h, r)), w, h, r)));
-const andNot = (a, b) => a.map((v, i) => (v && !b[i] ? 1 : 0));
+function invert(m) {
+  const o = new Uint8Array(m.length);
+  for (let i = 0; i < m.length; i++) o[i] = m[i] ? 0 : 1;
+  return o;
+}
+const close = (m, w, h, r) => (r <= 0 || m.indexOf(1) < 0 ? m : invert(dilate(invert(dilate(m, w, h, r)), w, h, r)));
+function andNot(a, b) {
+  const o = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i++) o[i] = a[i] && !b[i] ? 1 : 0;
+  return o;
+}
 
 // Ramer–Douglas–Peucker line simplification.
 function rdp(pts, eps) {
@@ -142,43 +173,82 @@ function components(mask, w, h, minArea, s) {
   return { mask: kept, blobs };
 }
 
-function hueOf(r, g, b, max, chroma) {
-  let h;
-  if (max === r) h = ((g - b) / chroma) % 6;
-  else if (max === g) h = (b - r) / chroma + 2;
-  else h = (r - g) / chroma + 4;
-  h *= 60;
-  return h < 0 ? h + 360 : h;
+// Colour features: lightness plus two opponent-colour axes. Lightness counts for
+// less than colour, because shadows and uneven light change it the most.
+function feat(r, g, b) {
+  return [0.299 * r + 0.587 * g + 0.114 * b, (r - g) * 0.7071, (r + g - 2 * b) * 0.4082];
 }
+const L_WEIGHT = 0.35;
+const TYPE_CODE = { none: 0, solid: 1, bouncy: 2, hazard: 3, goal: 4, coin: 5 };
+const CODE_TYPE = ['none', 'solid', 'bouncy', 'hazard', 'goal', 'coin'];
 
-const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
-
-// Which game type a hue becomes: the nearest taught marker colour.
-function typeForHue(h, hues, tol) {
-  let best = null, bestD = tol;
-  for (const t in hues) {
-    const d = hueDist(h, hues[t]);
-    if (d < bestD) { bestD = d; best = t; }
+// Look-up table from (quantised) colour to game type, rebuilt only when settings change.
+let lutCache = { key: '', lut: null };
+function getLUT(o) {
+  const key = JSON.stringify([o.sensitivity, o.colourMatch, o.samples]);
+  if (lutCache.key === key) return lutCache.lut;
+  const blackL = 2 * 240 * o.sensitivity - 240;       // paper/black midpoint sits at 240 x sensitivity
+  const protos = [
+    { type: 'none', f: feat(240, 240, 240), w: 1 },     // paper
+    { type: 'solid', f: [Math.max(0, blackL), 0, 0], w: 1 },
+    { type: 'solid', f: [Math.max(0, blackL - 40), 0, 0], w: 1 },
+    ...BUILT_IN.map(([type, r, g, b]) => ({ type, f: feat(r, g, b), w: 1 })),
+    // Teacher fixes win ties with the built-in examples.
+    ...o.samples.map((sm) => ({ type: sm.type === 'ignore' ? 'none' : sm.type, f: feat(sm.r, sm.g, sm.b), w: 0.8 })),
+  ];
+  const maxD2 = o.colourMatch * o.colourMatch;
+  const lut = new Uint8Array(32 * 32 * 32);
+  for (let qr = 0; qr < 32; qr++) for (let qg = 0; qg < 32; qg++) for (let qb = 0; qb < 32; qb++) {
+    const [L, a, bb] = feat(qr * 8 + 4, qg * 8 + 4, qb * 8 + 4);
+    let best = 'none', bestD = Infinity;
+    for (const p of protos) {
+      const dl = (L - p.f[0]) * L_WEIGHT, da = a - p.f[1], db = bb - p.f[2];
+      const d = (dl * dl + da * da + db * db) * p.w * p.w;
+      if (d < bestD) { bestD = d; best = p.type; }
+    }
+    lut[(qr << 10) | (qg << 5) | qb] = bestD <= maxD2 || best === 'none' ? TYPE_CODE[best] : 0;
   }
-  return best;
+  lutCache = { key, lut };
+  return lut;
 }
 
-// Average hue of coloured pixels near a world-space point (for teaching colours).
-export function sampleHue(det, x, y, radius = 10) {
+// Colour examples from the ink around a point (for fixing a mistake).
+// Returns up to three samples (typical, darker and lighter parts), or null if it's blank paper.
+export function sampleColours(det, x, y, radius = 12) {
   const s = det.scale, r = Math.round(radius / s);
   const cx = Math.round(x / s), cy = Math.round(y / s);
-  let sx = 0, sy = 0, n = 0;
+  const px = [];
   for (let yy = cy - r; yy <= cy + r; yy++) {
     for (let xx = cx - r; xx <= cx + r; xx++) {
-      if (xx < 0 || yy < 0 || xx >= det.w || yy >= det.h) continue;
-      const h = det.hueMap[yy * det.w + xx];
-      if (h < 0) continue;
-      sx += Math.cos((h * Math.PI) / 180); sy += Math.sin((h * Math.PI) / 180); n++;
+      if (xx < 0 || yy < 0 || xx >= det.w || yy >= det.h || (xx - cx) ** 2 + (yy - cy) ** 2 > r * r) continue;
+      const i = (yy * det.w + xx) * 3;
+      const c = [det.norm[i], det.norm[i + 1], det.norm[i + 2]];
+      const [L, a, b] = feat(...c);
+      if (L < 205 || Math.hypot(a, b) > 28) px.push({ c, L }); // looks like ink, not paper
     }
   }
-  if (n < 3) return null;
-  const h = (Math.atan2(sy, sx) * 180) / Math.PI;
-  return h < 0 ? h + 360 : h;
+  if (px.length < 4) return null;
+  px.sort((p, q) => p.L - q.L);
+  const median = (arr) => [0, 1, 2].map((k) => arr.map((p) => p.c[k]).sort((m, n) => m - n)[arr.length >> 1]);
+  const third = Math.max(1, Math.floor(px.length / 3));
+  const picks = [median(px), median(px.slice(0, third)), median(px.slice(-third))];
+  return picks.map(([r2, g2, b2]) => ({ r: Math.round(r2), g: Math.round(g2), b: Math.round(b2) }));
+}
+
+// What the detector currently thinks is at a point (nearest type within a radius).
+export function typeAt(det, x, y, radius = 10) {
+  const s = det.scale, r = Math.round(radius / s);
+  const cx = Math.round(x / s), cy = Math.round(y / s);
+  let best = null, bestD = Infinity;
+  for (const t of TYPES) {
+    const m = det.masks[t];
+    for (let yy = cy - r; yy <= cy + r; yy++) for (let xx = cx - r; xx <= cx + r; xx++) {
+      if (xx < 0 || yy < 0 || xx >= det.w || yy >= det.h || !m[yy * det.w + xx]) continue;
+      const d = (xx - cx) ** 2 + (yy - cy) ** 2;
+      if (d < bestD) { bestD = d; best = t; }
+    }
+  }
+  return best;
 }
 
 // ---------- main entry ----------
@@ -210,8 +280,10 @@ export function detectLevel(img, opts = {}) {
   // 2. Paper colour: global (brightest 30%) and local (box average)
   const grey = new Float32Array(n);
   for (let i = 0; i < n; i++) grey[i] = 0.299 * R[i] + 0.587 * G[i] + 0.114 * B[i];
-  const sorted = Float32Array.from(grey).sort();
-  const cut = sorted[Math.floor(n * 0.7)];
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) hist[Math.min(255, grey[i] | 0)]++;
+  let cut = 255;
+  for (let v = 0, acc = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.7) { cut = v; break; } }
   let pr = 0, pg = 0, pb = 0, pc = 0;
   for (let i = 0; i < n; i++) if (grey[i] >= cut) { pr += R[i]; pg += G[i]; pb += B[i]; pc++; }
   const paper = [pr / pc, pg / pc, pb / pc];
@@ -237,26 +309,23 @@ export function detectLevel(img, opts = {}) {
   // 3. Classify every pixel
   const raw = { solid: new Uint8Array(n), bouncy: new Uint8Array(n), hazard: new Uint8Array(n), goal: new Uint8Array(n), coin: new Uint8Array(n) };
   const anyColour = new Uint8Array(n);
-  const hueMap = new Float32Array(n).fill(-1);
+  const norm = new Uint8Array(n * 3);   // kept so the teacher can fix colours by clicking
+  const lut = getLUT(o);
   const m = o.margin;
-  for (let y = m; y < h - m; y++) {
-    for (let x = m; x < w - m; x++) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
       const i = y * w + x;
       // Normalise so the local paper reads as white (removes tinted / uneven light).
       const lr = local[0][i], lg = local[1][i], lb = local[2][i];
-      const r = Math.min(255, (R[i] / Math.max(lr, 0.6 * lr + 0.4 * paper[0], 1)) * 240);
-      const g = Math.min(255, (G[i] / Math.max(lg, 0.6 * lg + 0.4 * paper[1], 1)) * 240);
-      const b = Math.min(255, (B[i] / Math.max(lb, 0.6 * lb + 0.4 * paper[2], 1)) * 240);
-      const max = Math.max(r, g, b), min = Math.min(r, g, b), chroma = max - min;
-      const sat = max > 0 ? chroma / max : 0;
-      const hue = chroma > 20 && sat > 0.12 ? hueOf(r, g, b, max, chroma) : -1;
-      hueMap[i] = hue;
-      if (max > 55 && chroma > 38 && sat > o.colourSat) {
-        const t = typeForHue(hue, o.hues, o.hueTolerance);
-        if (t) { raw[t][i] = 1; anyColour[i] = 1; }
-      } else if (0.299 * r + 0.587 * g + 0.114 * b < 240 * o.sensitivity) {
-        raw.solid[i] = 1;
-      }
+      const r = Math.min(255, (R[i] / Math.max(lr, 0.6 * lr + 0.4 * paper[0], 1)) * 240) | 0;
+      const g = Math.min(255, (G[i] / Math.max(lg, 0.6 * lg + 0.4 * paper[1], 1)) * 240) | 0;
+      const b = Math.min(255, (B[i] / Math.max(lb, 0.6 * lb + 0.4 * paper[2], 1)) * 240) | 0;
+      norm[i * 3] = r; norm[i * 3 + 1] = g; norm[i * 3 + 2] = b;
+      if (x < m || y < m || x >= w - m || y >= h - m) continue;
+      const code = lut[((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)];
+      if (!code) continue;
+      raw[CODE_TYPE[code]][i] = 1;
+      if (code > 1) anyColour[i] = 1;
     }
   }
 
@@ -286,5 +355,5 @@ export function detectLevel(img, opts = {}) {
       if (t === 'coin') coins.push({ x: b.cx, y: b.cy, r: Math.max(9, Math.min(18, Math.sqrt(b.area / Math.PI))) });
     }
   }
-  return { w, h, scale: s, masks, outlines, coins, counts, hueMap };
+  return { w, h, scale: s, masks, outlines, coins, counts, norm };
 }

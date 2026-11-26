@@ -35,12 +35,23 @@ No camera? Try the built-in demo level, or a photo of a drawing.
 6. Press **Lock colours**, then click the four corners of the drawing area.
 7. Press **Start**. The setup is remembered for next time (**Use last setup**).
 
-Thick markers work best; pencil is ignored on purpose. If something is being missed, open **Tune**:
+Thick markers work best; pencil is ignored on purpose.
+
+## Fixing colours
+
+Lighting and marker sets vary, so the camera will sometimes get a colour wrong. Press **🎨 Fix colours**:
+
+1. Everything the camera recognised is tinted in its game colour, so mistakes stand out.
+2. Click anything that's wrong, then choose what it should be: Ground, Bouncy, Danger, Goal, Coin, or **Ignore** (for shadows, the table edge, or a marker you don't want in the game).
+3. The level updates straight away. **Undo** reverses the last fix; **Reset all** goes back to the standard colours.
+
+Fixes are colour examples, so one fix covers every mark in that marker, and any colour can be given any job (e.g. purple as bouncy). They're saved on that computer, so you only fix a room's lighting once.
+
+**Tune** has three sliders as well:
 
 - **Black ink:** raise if black lines are missed, lower if shadows become ground.
-- **Colour:** lower if faint colours (often yellow) are missed, raise if black lines pick up coloured edges.
+- **Colour match:** raise if coloured marks are being ignored, lower if unrelated colours are being picked up.
 - **Join gaps:** joins small breaks in wobbly lines.
-- **Teach colours:** if a marker is detected as the wrong thing (for example a green read as bouncy), choose the colour it should be, then click on something drawn in that marker. The game remembers your markers on that computer.
 
 ## Other keys
 
