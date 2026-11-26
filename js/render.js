@@ -74,13 +74,15 @@ function drawStartFlag(ctx, x, y, alpha) {
   ctx.restore();
 }
 
-// Dotted arcs showing how far and high a jump reaches, so kids draw fair levels.
-function drawJumpGuide(ctx, x, y) {
-  const g = PLAYER.gravity, v0 = PLAYER.jumpV, vx = PLAYER.runMax;
+// Dotted arcs showing how far and high you can travel from a point, so kids
+// draw fair levels. Used for the normal jump and for trampoline bounces.
+function drawReach(ctx, x, y, v0, colour, label) {
+  const g = PLAYER.gravity, vx = PLAYER.runMax;
   ctx.save();
   ctx.setLineDash([3, 6]);
   ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(224,21,127,0.55)';
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = colour;
   for (const dir of [-1, 1]) {
     ctx.beginPath();
     for (let f = 0; f <= (2 * v0) / g; f++) {
@@ -91,12 +93,23 @@ function drawJumpGuide(ctx, x, y) {
     ctx.stroke();
   }
   ctx.setLineDash([]);
-  const top = y - (v0 * v0) / (2 * g);
-  ctx.fillStyle = 'rgba(224,21,127,0.8)';
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = colour;
   ctx.font = '11px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('jump reach', x, top - 6);
+  ctx.fillText(label, x, y - (v0 * v0) / (2 * g) - 6);
   ctx.restore();
+}
+
+// Where a trampoline launches from: the middle of its top surface.
+function trampolineTop(points) {
+  let minX = Infinity, maxX = -Infinity;
+  for (const p of points) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); }
+  const cx = (minX + maxX) / 2, band = Math.max(6, (maxX - minX) * 0.2);
+  let top = Infinity;
+  for (const p of points) if (Math.abs(p.x - cx) <= band) top = Math.min(top, p.y);
+  if (!Number.isFinite(top)) top = Math.min(...points.map((p) => p.y));
+  return { x: cx, y: top };
 }
 
 export function drawScene(ctx, scale, s) {
@@ -134,7 +147,12 @@ export function drawScene(ctx, scale, s) {
       ctx.strokeStyle = st.colour;
       ctx.stroke();
     }
-    drawJumpGuide(ctx, start.x, start.y);
+    for (const o of det.outlines) {
+      if (o.type !== 'bouncy') continue;
+      const t = trampolineTop(o.points);
+      drawReach(ctx, t.x, t.y, PLAYER.bounceV, '#3a7bff', 'bounce reach');
+    }
+    drawReach(ctx, start.x, start.y, PLAYER.jumpV, '#e0157f', 'jump reach');
     drawStartFlag(ctx, start.x, start.y, 1);
     // Ghost figure for scale
     ctx.globalAlpha = 0.45;
