@@ -18,8 +18,18 @@ export const PLAYER = {
   coyote: 6,        // frames you can still jump after running off a ledge
   buffer: 7,        // frames a jump press is remembered before landing
 };
-// Trampolines launch you 50% higher than a normal jump (height grows with speed squared).
-PLAYER.bounceV = PLAYER.jumpV * Math.sqrt(1.5);
+// Trampolines: on their own they bounce you to half a normal jump. Press jump
+// while rising for more: the earlier the press, the higher you go, up to 1.5x a
+// normal jump. (Height grows with speed squared, hence the square roots.)
+PLAYER.bounceAuto = 0.5;   // fraction of a normal jump with no input
+PLAYER.bounceMax = 1.5;    // fraction of a normal jump with a perfectly timed press
+// Height reached from launch speed v, and its inverse, for this game's
+// frame-by-frame physics (gravity is applied before each move).
+export const heightFor = (v) => (v * v) / (2 * PLAYER.gravity) - v / 2;
+export const speedFor = (h) => (PLAYER.gravity + Math.sqrt(PLAYER.gravity ** 2 + 8 * PLAYER.gravity * Math.max(0, h))) / 2;
+PLAYER.jumpHeight = heightFor(PLAYER.jumpV);
+PLAYER.bounceV = speedFor(PLAYER.bounceAuto * PLAYER.jumpHeight);
+PLAYER.bounceMaxV = speedFor(PLAYER.bounceMax * PLAYER.jumpHeight);
 
 export class Level {
   constructor(det, W, H) {
@@ -77,6 +87,8 @@ export class Player {
     this.facing = 1;
     this.onGround = false;
     this.jumping = false;
+    this.bouncing = false;   // rising from a trampoline, boost not used yet
+    this.bounceFromY = 0;
     this.coyote = 0;
     this.buffer = 0;
     this.phase = 0;        // run cycle
@@ -110,6 +122,9 @@ export class Player {
       this.squash = -0.25;
       events.push({ type: 'jump', x: this.x, y: this.y });
     }
+    // Trampoline boost: press jump on the way up. Earlier = higher.
+    if (this.bouncing && this.vy < 0 && input.jumpPressed) this.boost(events);
+    if (this.vy >= 0) this.bouncing = false;
     this.buffer--;
     // Let go early for a small hop.
     if (this.jumping && !input.jumpHeld && this.vy < -3.5) this.vy = -3.5;
@@ -136,6 +151,22 @@ export class Player {
     }
   }
 
+  // Raise a trampoline bounce. `progress` is how far through the automatic
+  // bounce's rise we are (0 = just launched, 1 = at its top).
+  boost(events) {
+    const P = PLAYER;
+    const autoRise = P.bounceAuto * P.jumpHeight;
+    const progress = Math.max(0, Math.min(1, (this.bounceFromY - this.y) / autoRise));
+    // Remaining rise needed so the total height is auto + (max - auto) * (1 - progress).
+    const remaining = P.bounceMax * P.jumpHeight * (1 - progress);
+    const v = speedFor(remaining);
+    if (v > -this.vy) this.vy = -v;
+    this.bouncing = false;
+    this.buffer = 0;
+    this.squash = -0.3;
+    events.push({ type: 'boost', x: this.x, y: this.y, power: 1 - progress });
+  }
+
   moveX(level) {
     const steps = Math.ceil(Math.abs(this.vx));
     if (!steps) return;
@@ -154,39 +185,42 @@ export class Player {
   }
 
   moveY(level, events) {
+    const wasOnGround = this.onGround;
     const steps = Math.ceil(Math.abs(this.vy));
     const step = steps ? this.vy / steps : 0;
-    let landed = false;
+    let hitFloor = false;
     for (let i = 0; i < steps; i++) {
       const ny = this.y + step;
       if (!level.blocked(this.x, ny)) { this.y = ny; continue; }
-      if (step > 0) landed = true;
-      else events.push({ type: 'bonk', x: this.x, y: this.y - PLAYER.h });
+      if (step > 0) hitFloor = true;
+      else { this.vy = 0; events.push({ type: 'bonk', x: this.x, y: this.y - PLAYER.h }); }
       break;
     }
-    if (landed) {
-      const impact = this.vy;
-      const hw = PLAYER.w / 2;
-      const onBouncy = level.hits(level.bouncy, this.x - hw, this.y, this.x + hw, this.y + 3);
-      if (onBouncy) {
-        this.vy = -PLAYER.bounceV;
-        this.onGround = false;
-        this.jumping = false;
-        this.squash = -0.35;
-        events.push({ type: 'bounce', x: this.x, y: this.y });
-        return;
-      }
-      this.vy = 0;
-      if (!this.onGround) {
-        this.squash = Math.min(0.4, impact / 30);
-        events.push({ type: 'land', x: this.x, y: this.y, impact });
-      }
-      this.onGround = true;
+    // Touching the floor counts as landing even if the fall ended exactly on it.
+    const onFloor = hitFloor || (this.vy >= 0 && level.blocked(this.x, this.y + 1));
+    if (!onFloor) { this.onGround = false; return; }
+
+    const hw = PLAYER.w / 2;
+    if (level.hits(level.bouncy, this.x - hw, this.y, this.x + hw, this.y + 3)) {
+      this.vy = -PLAYER.bounceV;
+      this.onGround = false;
       this.jumping = false;
-    } else {
-      this.onGround = this.vy >= 0 && level.blocked(this.x, this.y + 1);
-      if (this.onGround) { this.vy = 0; this.jumping = false; }
+      this.coyote = 0;           // no normal jump in mid-air after a bounce
+      this.bouncing = true;
+      this.bounceFromY = this.y;
+      this.squash = -0.35;
+      events.push({ type: 'bounce', x: this.x, y: this.y });
+      // Pressed jump just before landing on it? That's the earliest press: full boost.
+      if (this.buffer > 0) this.boost(events);
+      return;
     }
+    if (!wasOnGround) {
+      this.squash = Math.min(0.4, this.vy / 30);
+      events.push({ type: 'land', x: this.x, y: this.y, impact: this.vy });
+    }
+    this.vy = 0;
+    this.onGround = true;
+    this.jumping = false;
   }
 }
 

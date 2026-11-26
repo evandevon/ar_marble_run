@@ -150,7 +150,8 @@ export function drawScene(ctx, scale, s) {
     for (const o of det.outlines) {
       if (o.type !== 'bouncy') continue;
       const t = trampolineTop(o.points);
-      drawReach(ctx, t.x, t.y, PLAYER.bounceV, '#3a7bff', 'bounce reach');
+      drawReach(ctx, t.x, t.y, PLAYER.bounceMaxV, '#3a7bff', 'bounce + jump');
+      drawReach(ctx, t.x, t.y, PLAYER.bounceV, '#7fa6ff', 'bounce');
     }
     drawReach(ctx, start.x, start.y, PLAYER.jumpV, '#e0157f', 'jump reach');
     drawStartFlag(ctx, start.x, start.y, 1);

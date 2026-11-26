@@ -9,14 +9,14 @@ Draw a level with whiteboard markers on paper (or a mini whiteboard). A webcam l
 | Marker | Becomes |
 |---|---|
 | **Black** | Ground and walls. Any shape: lines, slopes, boxes, scribbles |
-| **Blue** | Bouncy trampoline |
+| **Blue** | Trampoline. Bounces you half a jump on its own; press jump as you take off to go higher (up to 1.5× a normal jump). The earlier the press, the higher you go |
 | **Red** | Danger (lava, spikes). Touch it and you restart |
 | **Green** | The goal. Touch it to win |
 | **Orange / yellow** | Coins. Draw dots |
 
 ## How to play
 
-1. **Build mode:** draw the level. The camera outlines what it sees in each colour. Click the paper to move the start flag. The dotted arcs show how far and high the character can jump.
+1. **Build mode:** draw the level. The camera outlines what it sees in each colour. Click the paper to move the start flag. The dotted arcs show how far and high the character can jump, and how high trampolines can bounce with and without a jump.
 2. Press **Play** (or Enter). The level freezes and the stick figure appears.
 3. **← →** (or A/D) to run, **Space / ↑ / W** to jump. Hold jump for a higher jump. **R** restarts.
 4. Reach the green goal. You have 3 lives (change this under **Tune**). Press **Build** to change the drawing and try again.
