@@ -1,4 +1,6 @@
 // Particles, floating text and little synthesised sound effects.
+import { PLAYER } from './platformer.js';
+const PLAYER_BOUNCE_MAX = PLAYER.bounceMax;
 
 export class Effects {
   constructor() {
@@ -50,8 +52,9 @@ export class Effects {
         const n = Math.round(6 + e.power * 18);
         this.ring(e.x, e.y, '#9cc0ff', 20 + e.power * 30);
         this.burst(e.x, e.y, { count: n, speed: 2 + e.power * 4, colour: ['#3a7bff', '#9cc0ff', '#ffffff'], angle: Math.PI / 2, spread: 1.6, life: 26, shape: 'star', size: 3.5 });
-        if (e.power > 0.8) this.text(e.x, e.y - 50, 'SUPER!', '#3a7bff');
-        sfx.play('boost', e.power);
+        if (e.ratio > PLAYER_BOUNCE_MAX + 0.01) this.text(e.x, e.y - 50, 'HIGHER!', '#3a7bff');
+        else if (e.power > 0.8) this.text(e.x, e.y - 50, 'SUPER!', '#3a7bff');
+        sfx.play('boost', e.ratio ? e.ratio / PLAYER_BOUNCE_MAX : e.power);
         break;
       }
       case 'bonk':
@@ -175,7 +178,7 @@ export class Sfx {
   play(name, power = 1) {
     if (this.muted || !this.ctx) return;
     switch (name) {
-      case 'boost': this.tone(400, 900 + power * 900, 0.22, 'square', 0.06); break;
+      case 'boost': this.tone(400, Math.min(2600, 900 + power * 900), 0.22, 'square', 0.06); break;
       case 'jump': this.tone(300, 620, 0.12, 'square', 0.06); break;
       case 'land': this.tone(140, 60, 0.08, 'triangle', 0.12); break;
       case 'bounce': this.tone(180, 720, 0.28, 'sine', 0.16); break;

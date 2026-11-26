@@ -9,7 +9,7 @@ Draw a level with whiteboard markers on paper (or a mini whiteboard). A webcam l
 | Marker | Becomes |
 |---|---|
 | **Black** | Ground and walls. Any shape: lines, slopes, boxes, scribbles |
-| **Blue** | Trampoline. Bounces you half a jump on its own; press jump as you take off to go higher (up to 1.5× a normal jump). The earlier the press, the higher you go |
+| **Blue** | Trampoline. Bounces you half a jump on its own. Press jump as you take off to go higher (up to 1.5× a normal jump); the earlier the press, the higher. Keep jump held and each bounce in a row goes higher still |
 | **Red** | Danger (lava, spikes). Touch it and you restart |
 | **Green** | The goal. Touch it to win |
 | **Orange / yellow** | Coins. Draw dots |

@@ -23,6 +23,9 @@ export const PLAYER = {
 // normal jump. (Height grows with speed squared, hence the square roots.)
 PLAYER.bounceAuto = 0.5;   // fraction of a normal jump with no input
 PLAYER.bounceMax = 1.5;    // fraction of a normal jump with a perfectly timed press
+// Holding jump the whole time "pumps" the trampoline: each bounce in a row goes higher.
+PLAYER.bounceGrow = 0.25;  // extra fraction of a jump per held bounce
+PLAYER.bounceCeiling = 4;  // safety ceiling for pumped bounces
 // Height reached from launch speed v, and its inverse, for this game's
 // frame-by-frame physics (gravity is applied before each move).
 export const heightFor = (v) => (v * v) / (2 * PLAYER.gravity) - v / 2;
@@ -90,6 +93,10 @@ export class Player {
     this.bouncing = false;   // rising from a trampoline, boost not used yet
     this.airborneFromBounce = false;  // in the air after a bounce (until landing)
     this.bounceFromY = 0;
+    this.bounceCap = PLAYER.bounceMax; // highest this bounce may rise (fraction of a jump)
+    this.chainRatio = 0;      // height of the previous bounce in a row (fraction of a jump)
+    this.heldAirborne = false; // jump held continuously since leaving the ground
+    this.inputHeld = false;
     this.coyote = 0;
     this.buffer = 0;
     this.phase = 0;        // run cycle
@@ -112,12 +119,16 @@ export class Player {
     }
 
     // --- jumping (with coyote time and input buffering so it feels fair)
+    this.inputHeld = !!input.jumpHeld;
+    if (!this.onGround && !input.jumpHeld) this.heldAirborne = false;
     if (input.jumpPressed) this.buffer = P.buffer;
     this.coyote = this.onGround ? P.coyote : this.coyote - 1;
     if (this.buffer > 0 && this.coyote > 0) {
       this.vy = -P.jumpV;
       this.onGround = false;
       this.jumping = true;
+      this.heldAirborne = true;
+      this.chainRatio = 0;
       this.coyote = 0;
       this.buffer = 0;
       this.squash = -0.25;
@@ -128,7 +139,7 @@ export class Player {
     if (this.vy >= 0) this.bouncing = false;
     // Hard limit: nothing can carry a bounce above the trampoline's maximum height.
     if (this.airborneFromBounce && this.vy < 0) {
-      const allowed = P.bounceMax * P.jumpHeight - (this.bounceFromY - this.y);
+      const allowed = this.bounceCap * P.jumpHeight - (this.bounceFromY - this.y);
       if (allowed <= 0) this.vy = 0;
       else if (heightFor(-this.vy) > allowed) this.vy = -speedFor(allowed);
     }
@@ -168,8 +179,11 @@ export class Player {
     const remaining = P.bounceMax * P.jumpHeight * (1 - progress);
     const v = speedFor(remaining);
     if (v > -this.vy) this.vy = -v;
+    // Remember how high this bounce goes, so a held chain can grow from it.
+    this.chainRatio = Math.max(this.chainRatio, P.bounceAuto + (P.bounceMax - P.bounceAuto) * (1 - progress));
     this.bouncing = false;
     this.buffer = 0;
+    this.heldAirborne = true;
     this.squash = -0.3;
     events.push({ type: 'boost', x: this.x, y: this.y, power: 1 - progress });
   }
@@ -209,17 +223,36 @@ export class Player {
 
     const hw = PLAYER.w / 2;
     if (level.hits(level.bouncy, this.x - hw, this.y, this.x + hw, this.y + 3)) {
-      this.vy = -PLAYER.bounceV;
+      const P = PLAYER;
+      const heldThrough = this.heldAirborne && this.inputHeld;
       this.onGround = false;
       this.jumping = false;
       this.coyote = 0;           // no normal jump in mid-air after a bounce
-      this.bouncing = true;
       this.airborneFromBounce = true;
       this.bounceFromY = this.y;
       this.squash = -0.35;
       events.push({ type: 'bounce', x: this.x, y: this.y });
-      // Pressed jump just before landing on it? That's the earliest press: full boost.
-      if (this.buffer > 0) this.boost(events);
+      if (heldThrough) {
+        // Held jump the whole way down: pump. First bounce is a full jump+bounce,
+        // then each bounce in a row adds a little more.
+        const ratio = this.chainRatio > 0
+          ? Math.min(P.bounceCeiling, this.chainRatio + P.bounceGrow)
+          : P.bounceMax;
+        this.vy = -speedFor(ratio * P.jumpHeight);
+        this.bounceCap = ratio;
+        this.chainRatio = ratio;
+        this.bouncing = false;
+        this.buffer = 0;
+        events.push({ type: 'boost', x: this.x, y: this.y, power: 1, ratio });
+      } else {
+        this.vy = -P.bounceV;
+        this.bounceCap = P.bounceMax;
+        this.chainRatio = P.bounceAuto;
+        this.bouncing = true;
+        // Pressed jump just before landing on it? That's the earliest press: full boost.
+        if (this.buffer > 0) this.boost(events);
+      }
+      this.heldAirborne = this.inputHeld;
       return;
     }
     if (!wasOnGround) {
@@ -230,6 +263,8 @@ export class Player {
     this.onGround = true;
     this.jumping = false;
     this.airborneFromBounce = false;
+    this.chainRatio = 0;
+    this.heldAirborne = false;
   }
 }
 

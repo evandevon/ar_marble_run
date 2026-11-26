@@ -193,7 +193,10 @@ export function drawScene(ctx, scale, s) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     const items = [];
-    if (Number.isFinite(game.maxLives)) items.push('❤️'.repeat(Math.max(0, game.lives)) + '🖤'.repeat(game.maxLives - Math.max(0, game.lives)));
+    if (Number.isFinite(game.maxLives)) {
+      const left = Math.max(0, Math.min(game.maxLives, game.lives));
+      items.push('❤️'.repeat(left) + '🖤'.repeat(game.maxLives - left));
+    }
     if (game.coinsTotal) items.push(`🪙 ${game.coinsTaken}/${game.coinsTotal}`);
     items.push(`⏱ ${game.seconds.toFixed(1)}s`);
     if (game.deaths && !Number.isFinite(game.maxLives)) items.push(`💥 ${game.deaths}`);
