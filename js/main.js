@@ -4,6 +4,9 @@ import { Level, Game } from './platformer.js';
 import { Effects, Sfx } from './effects.js';
 import { WebcamSource, ImageSource, listCameras, loadImageFile, makeDemoDrawing } from './camera.js';
 import { drawScene, buildCleanImage } from './render.js';
+import * as Library from './library.js';
+import { readFiles, flattenPage, flattenPlain, rotateCanvas, shrink } from './importer.js';
+import { findCornerMarks } from './markers.js';
 
 // The game world is the flattened paper, in "paper pixels" (A-series ratio).
 const WORLD_W = 1000;
@@ -13,7 +16,7 @@ const STORE_KEY = 'paper-platformer.calibration.v2';
 const SETTINGS_KEY = 'paper-platformer.settings.v1';
 const STEP_MS = 1000 / 60;
 
-const VERSION = '2026-11-26.9';
+const VERSION = '2026-11-26.10';
 const $ = (id) => document.getElementById(id);
 document.getElementById('version').textContent = `Version ${VERSION}`;
 
@@ -26,6 +29,8 @@ const app = {
   vision: { ...DEFAULT_VISION, samples: [] },
   orient: { rotate: 0, flipH: false, flipV: false },
   maxLives: 3,
+  currentLevelId: null,   // set while playing a saved level
+  levelIds: [],           // the library order, for previous / next
   fixing: false,          // Fix colours mode
   fixUndo: [],            // number of samples added by each fix, for undo
   pendingFix: null,       // { x, y, samples } waiting for the teacher to choose a type
@@ -67,6 +72,7 @@ function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
   if (id === 'play') resizeGame();
   if (id === 'setup') resizeSetup();
+  if (id === 'library') renderLibrary();
 }
 document.querySelectorAll('[data-goto]').forEach((b) =>
   b.addEventListener('click', () => { stopSource(); show(b.dataset.goto); }));
@@ -105,7 +111,9 @@ $('photo-input').addEventListener('change', async (e) => {
   $('btn-lock').hidden = true;
   updateOrientButtons();
   setCorners([]);
+  app.currentLevelId = null;
   show('setup');
+  findMarks(true);
   e.target.value = '';
 });
 document.querySelector('label[for="photo-input"]').addEventListener('keydown', (e) => {
@@ -129,6 +137,7 @@ async function startWebcam(deviceId) {
     await fillCameraList(deviceId);
     loadSavedCorners();
     resizeSetup();
+    if (app.corners.length < 4) setTimeout(() => findMarks(true), 600);
   } catch (err) {
     status.className = 'status warn';
     status.textContent = err.name === 'NotAllowedError'
@@ -301,12 +310,28 @@ function drawSetup() {
 $('btn-play').addEventListener('click', () => {
   setCorners(app.corners);
   saveSetup();
+  app.currentLevelId = null;
+  updateLevelNav();
   const paper = [{ x: 0, y: 0 }, { x: WORLD_W, y: 0 }, { x: WORLD_W, y: WORLD_H }, { x: 0, y: WORLD_H }];
   app.H = computeHomography(paper, app.corners);
   show('play');
   setMode('build');
   scan(true);
 });
+
+// Look for the printed sheet's four corner squares and use them as the corners.
+function findMarks(quiet = false) {
+  if (!app.source) return false;
+  const pts = findCornerMarks(app.source.capture());
+  if (pts) {
+    setCorners(pts);
+    toast('Found the corner marks on the level sheet ✓');
+    return true;
+  }
+  if (!quiet) toast('Couldn’t see all four corner squares. Check they’re in view, or click the corners instead.', 3500);
+  return false;
+}
+$('btn-find-marks').addEventListener('click', () => findMarks(false));
 
 // ---------------------------------------------------------------- scanning
 function scan(force = false) {
@@ -363,6 +388,7 @@ $('btn-view').addEventListener('click', blurAfter(toggleView));
 $('btn-sound').addEventListener('click', blurAfter(toggleSound));
 $('btn-recal').addEventListener('click', blurAfter(() => {
   setMode('build');
+  if (app.currentLevelId) { show('library'); return; }
   show('setup');
   if (app.source?.kind === 'webcam') loadSavedCorners();
 }));
@@ -478,6 +504,267 @@ $('btn-fix-reset').addEventListener('click', () => {
   toast('Back to the standard marker colours');
 });
 
+// ---------------------------------------------------------------- class levels
+const DEFAULT_START = { x: 70, y: 90 };
+
+function fmtDate(t) {
+  try { return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; }
+}
+
+async function renderLibrary() {
+  const grid = $('lib-grid');
+  let levels = [];
+  try { levels = await Library.listLevels(); } catch (err) {
+    grid.innerHTML = '';
+    $('lib-empty').hidden = false;
+    $('lib-empty').innerHTML = `<p><b>This browser won't let the game save levels.</b></p><p>${err.message || ''} Private/incognito windows often block saving.</p>`;
+    return;
+  }
+  app.levelIds = levels.map((l) => l.id);
+  $('lib-empty').hidden = levels.length > 0;
+  $('btn-export').disabled = !levels.length;
+  grid.innerHTML = '';
+  for (const l of levels) {
+    const li = document.createElement('li');
+    li.className = 'lib-card';
+    li.innerHTML = `
+      <button class="thumb" aria-label="Play ${escapeHtml(l.name)}"><img alt="" src="${l.thumb}"></button>
+      <div class="meta"><div class="name"></div><div class="date">${fmtDate(l.created)}</div></div>
+      <div class="acts">
+        <button class="primary play">▶ Play</button>
+        <button class="secondary ren" title="Rename">✎</button>
+        <button class="secondary del" title="Delete">🗑</button>
+      </div>`;
+    li.querySelector('.name').textContent = l.name;
+    li.querySelector('.thumb').addEventListener('click', () => playLevel(l.id));
+    li.querySelector('.play').addEventListener('click', () => playLevel(l.id));
+    li.querySelector('.ren').addEventListener('click', async () => {
+      const name = prompt('New name for this level:', l.name);
+      if (name && name.trim()) { await Library.renameLevel(l.id, name.trim().slice(0, 80)); renderLibrary(); }
+    });
+    li.querySelector('.del').addEventListener('click', async () => {
+      if (!confirm(`Delete "${l.name}"? This can't be undone (unless it's in an exported library file).`)) return;
+      await Library.deleteLevel(l.id);
+      renderLibrary();
+    });
+    grid.appendChild(li);
+  }
+}
+const escapeHtml = (t) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function playLevel(id) {
+  const level = await Library.getLevel(id);
+  if (!level) return;
+  if (!app.levelIds.includes(id)) app.levelIds = (await Library.listLevels()).map((l) => l.id);
+  const img = await Library.loadImage(level.image);
+  stopSource();
+  app.source = new ImageSource(img);
+  setCorners([{ x: 0, y: 0 }, { x: img.width, y: 0 }, { x: img.width, y: img.height }, { x: 0, y: img.height }]);
+  const paper = [{ x: 0, y: 0 }, { x: WORLD_W, y: 0 }, { x: WORLD_W, y: WORLD_H }, { x: 0, y: WORLD_H }];
+  app.H = computeHomography(paper, app.corners);
+  app.start = level.start || { ...DEFAULT_START };
+  app.currentLevelId = id;
+  app.currentLevelName = level.name;
+  updateLevelNav();
+  show('play');
+  setMode('build');
+  scan(true);
+  if (!level.start) {
+    app.start = guessStart(app.det);
+    Library.updateStart(id, app.start).catch(() => {});
+  }
+  toast(level.name, 1800);
+}
+
+// No start flag yet: stand on the left-most piece of ground.
+function guessStart(det) {
+  let best = null;
+  for (const o of det.outlines) {
+    if (o.type !== 'solid') continue;
+    const minX = Math.min(...o.points.map((p) => p.x));
+    if (!best || minX < best.minX) best = { o, minX };
+  }
+  if (!best) return { ...DEFAULT_START };
+  const x = best.minX + 22;
+  const tops = best.o.points.filter((p) => Math.abs(p.x - x) < 14).map((p) => p.y);
+  const y = tops.length ? Math.min(...tops) - 2 : Math.min(...best.o.points.map((p) => p.y)) - 2;
+  return { x: Math.max(12, x), y: Math.max(50, y) };
+}
+
+function stepLevel(dir) {
+  const ids = app.levelIds;
+  if (!ids.length || !app.currentLevelId) return;
+  const i = ids.indexOf(app.currentLevelId);
+  playLevel(ids[(i + dir + ids.length) % ids.length]);
+}
+
+function updateLevelNav() {
+  const on = !!app.currentLevelId;
+  $('level-nav').hidden = !on;
+  $('btn-recal').textContent = on ? '📚 All levels' : '⚙ Setup';
+  $('btn-levels').hidden = on;
+  if (on) {
+    const i = app.levelIds.indexOf(app.currentLevelId);
+    $('level-name').textContent = `${app.currentLevelName || ''}  (${i + 1}/${app.levelIds.length})`;
+    $('level-name').title = app.currentLevelName || '';
+    $('btn-prev-level').disabled = $('btn-next-level').disabled = app.levelIds.length < 2;
+  }
+}
+
+$('btn-library').addEventListener('click', () => { stopSource(); show('library'); });
+$('btn-levels').addEventListener('click', blurAfter(() => { setMode('build'); stopSource(); app.currentLevelId = null; show('library'); }));
+$('btn-prev-level').addEventListener('click', blurAfter(() => stepLevel(-1)));
+$('btn-next-level').addEventListener('click', blurAfter(() => stepLevel(1)));
+for (const id of ['scan-input', 'lib-file-input']) {
+  document.querySelector(`label[for="${id}"]`).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $(id).click(); }
+  });
+}
+
+// --- Save level
+$('btn-save').addEventListener('click', blurAfter(async () => {
+  if (!app.source) return;
+  if (app.mode === 'build') scan(true);
+  const count = (await Library.listLevels().catch(() => [])).length;
+  $('save-name').value = app.currentLevelId ? (app.currentLevelName || '') : `Level ${count + 1}`;
+  $('save-as-new').hidden = !app.currentLevelId;
+  $('save-ok').textContent = app.currentLevelId ? 'Update' : 'Save';
+  $('save-dialog').showModal();
+  $('save-name').select();
+}));
+$('save-dialog').addEventListener('close', async () => {
+  const how = $('save-dialog').returnValue;
+  if (how !== 'save' && how !== 'new') return;
+  const name = $('save-name').value.trim().slice(0, 80) || 'Untitled level';
+  try {
+    const level = await Library.saveLevel({
+      id: how === 'save' ? app.currentLevelId : null,
+      name, canvas: app.paperCanvas, start: app.start,
+    });
+    if (app.currentLevelId) { app.currentLevelId = level.id; app.currentLevelName = level.name; }
+    app.levelIds = (await Library.listLevels()).map((l) => l.id);
+    if (app.currentLevelId) updateLevelNav();
+    toast(`Saved "${name}" to Class levels`);
+  } catch (err) {
+    toast('Could not save: ' + (err.message || 'storage blocked'), 4000);
+  }
+});
+
+// --- Export / import library file
+$('btn-export').addEventListener('click', async () => {
+  const blob = await Library.exportLibrary();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `class-levels-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
+$('lib-file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const { added, skipped } = await Library.importLibrary(file);
+    toast(`Added ${added} level${added === 1 ? '' : 's'}${skipped ? ` (${skipped} already here)` : ''}`, 3000);
+  } catch (err) {
+    toast(err.message, 3500);
+  }
+  renderLibrary();
+});
+
+// --- Add scans (PDF or photos) with a review step
+let importItems = [];
+function drawThumb(item) {
+  const c = item.el.querySelector('canvas');
+  c.width = 300; c.height = 212;
+  c.getContext('2d').drawImage(item.world, 0, 0, c.width, c.height);
+}
+function addImportItem(item) {
+  const li = document.createElement('li');
+  li.className = 'import-item';
+  li.innerHTML = `
+    <canvas></canvas>
+    <input type="text" maxlength="80" aria-label="Level name">
+    <span class="badge"></span>
+    <div class="row">
+      <button class="secondary rot" title="Turn the page">⟳ Turn</button>
+      <label class="inc"><input type="checkbox" checked> Add</label>
+    </div>`;
+  item.el = li;
+  li.querySelector('input[type="text"]').value = item.name;
+  li.querySelector('input[type="text"]').addEventListener('input', (e) => { item.name = e.target.value; });
+  li.querySelector('input[type="text"]').addEventListener('focus', (e) => e.target.select());
+  const badge = li.querySelector('.badge');
+  badge.textContent = item.marks ? 'Corner marks found ✓' : 'No corner marks: whole page used';
+  badge.classList.toggle('warn', !item.marks);
+  li.querySelector('.rot').addEventListener('click', () => {
+    if (item.marks) item.world = rotateCanvas(item.world, 180);
+    else { item.rot = (item.rot + 90) % 360; item.world = flattenPlain(rotateCanvas(item.source, item.rot)).canvas; }
+    drawThumb(item);
+  });
+  li.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+    item.include = e.target.checked;
+    li.classList.toggle('skip', !item.include);
+    updateImportButton();
+  });
+  $('import-list').appendChild(li);
+  drawThumb(item);
+}
+function updateImportButton() {
+  const n = importItems.filter((i) => i.include).length;
+  $('import-ok').disabled = !n;
+  $('import-ok').textContent = `Add ${n} level${n === 1 ? '' : 's'}`;
+}
+
+$('scan-input').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  importItems = [];
+  $('import-list').innerHTML = '';
+  $('import-ok').disabled = true;
+  $('import-status').textContent = 'Reading files…';
+  $('import-dialog').showModal();
+  const startCount = (await Library.listLevels().catch(() => [])).length;
+  try {
+    await readFiles(files, async (canvas, label) => {
+      const res = flattenPage(canvas);
+      const item = {
+        name: `Level ${startCount + importItems.length + 1}`,
+        label, world: res.canvas, marks: res.marks, include: true,
+        rot: canvas.height > canvas.width ? 90 : 0,
+        source: res.marks ? null : shrink(canvas),
+      };
+      importItems.push(item);
+      addImportItem(item);
+      updateImportButton();
+      await new Promise((r) => setTimeout(r, 0));   // keep the page responsive
+    }, (msg) => { $('import-status').textContent = msg; });
+    const found = importItems.filter((i) => i.marks).length;
+    $('import-status').textContent = importItems.length
+      ? `${importItems.length} page${importItems.length === 1 ? '' : 's'} read. ${found} cropped using the corner marks. Name each level (e.g. the student's name), turn any that are sideways, then add them.`
+      : 'No pages found in those files.';
+  } catch (err) {
+    $('import-status').textContent = 'Could not read that file: ' + (err.message || err);
+  }
+});
+$('import-cancel').addEventListener('click', () => { importItems = []; $('import-dialog').close(); });
+$('import-ok').addEventListener('click', async () => {
+  const items = importItems.filter((i) => i.include);
+  $('import-ok').disabled = true;
+  let n = 0;
+  for (const it of items) {
+    $('import-status').textContent = `Saving ${++n} of ${items.length}…`;
+    await Library.saveLevel({ name: it.name.trim() || 'Untitled level', canvas: it.world, start: null });
+  }
+  importItems = [];
+  $('import-dialog').close();
+  toast(`Added ${items.length} level${items.length === 1 ? '' : 's'} to Class levels`, 3000);
+  renderLibrary();
+});
+
 // ---------------------------------------------------------------- input
 const keys = new Set();
 let jumpQueued = false;
@@ -486,7 +773,10 @@ const GAME_KEYS = [...JUMP_KEYS, 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'KeyA',
 
 document.addEventListener('keydown', (e) => {
   if (!isActive('play')) return;
-  if (e.target.tagName === 'SELECT') return;
+  // Typing in a box (level names, etc.) must never control the game.
+  const t = e.target;
+  if (t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type !== 'range' && t.type !== 'checkbox')) return;
+  if (document.querySelector('dialog[open]')) return;
   if (GAME_KEYS.includes(e.code)) e.preventDefault();
   if (!keys.has(e.code) && JUMP_KEYS.includes(e.code)) jumpQueued = true;
   keys.add(e.code);
@@ -499,6 +789,8 @@ document.addEventListener('keydown', (e) => {
   else if (e.code === 'KeyF') toggleFullscreen();
   else if (e.code === 'KeyC') toggleView();
   else if (e.code === 'KeyM') toggleSound();
+  else if (e.code === 'PageDown' && app.currentLevelId) { e.preventDefault(); stepLevel(1); }
+  else if (e.code === 'PageUp' && app.currentLevelId) { e.preventDefault(); stepLevel(-1); }
 });
 document.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
@@ -561,7 +853,8 @@ gameCanvas.addEventListener('pointerdown', (e) => {
     x: Math.max(12, Math.min(WORLD_W - 12, ((e.clientX - r.left) / r.width) * WORLD_W)),
     y: Math.max(50, Math.min(WORLD_H - 4, ((e.clientY - r.top) / r.height) * WORLD_H)),
   };
-  saveSetup();
+  if (app.currentLevelId) Library.updateStart(app.currentLevelId, app.start).catch(() => {});
+  else saveSetup();
 });
 
 // Hide the toolbar in fullscreen when the mouse is idle.

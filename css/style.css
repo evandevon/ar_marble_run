@@ -15,6 +15,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
 body { overflow: hidden; }
 
@@ -144,7 +145,8 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 8p
 @keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 @media (max-width: 1500px) { .hint-inline { display: none; } }
-@media (max-width: 1100px) { .legend.mini { display: none; } }
+@media (max-width: 1450px) { .legend.mini { display: none; } }
+@media (max-width: 1100px) { .level-name { max-width: 120px; } }
 @media (prefers-reduced-motion: reduce) { .win-card { animation: none; } }
 
 .hint.small { font-size: 0.82rem; margin: 6px 0 10px; }
@@ -167,3 +169,48 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 8p
 .fix-menu button.current { outline: 1px dashed var(--muted); }
 .fix-menu .fix-cancel { color: var(--muted); justify-content: center; }
 .version { margin-top: 28px; color: var(--muted); font-size: 0.8rem; opacity: 0.7; }
+
+/* ---------- library ---------- */
+#library { overflow-y: auto; }
+.lib-inner { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; width: 100%; }
+.lib-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.lib-head h2 { margin: 0; font-size: 1.6rem; }
+.lib-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.btn { display: inline-flex; align-items: center; border-radius: 10px; padding: 0.6em 1em; cursor: pointer; text-decoration: none; color: inherit; font-size: 1rem; }
+.btn.primary { color: var(--accent-ink); }
+.lib-note { color: var(--muted); font-size: 0.92rem; margin: 12px 0 18px; }
+.lib-empty { background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius); padding: 18px 20px; color: var(--muted); }
+.lib-empty b { color: var(--text); }
+.lib-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.lib-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
+.lib-card .thumb { aspect-ratio: 1000 / 707; background: #fff; cursor: pointer; border: 0; padding: 0; border-radius: 0; display: block; width: 100%; }
+.lib-card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-card .meta { padding: 10px 12px 4px; }
+.lib-card .name { font-weight: 700; overflow-wrap: anywhere; }
+.lib-card .date { color: var(--muted); font-size: 0.82rem; }
+.lib-card .acts { display: flex; gap: 6px; padding: 8px 12px 12px; margin-top: auto; }
+.lib-card .acts button { padding: 0.45em 0.7em; font-size: 0.9rem; }
+.lib-card .acts .play { flex: 1; }
+
+.level-nav { display: flex; align-items: center; gap: 6px; }
+.level-nav[hidden] { display: none; }
+.level-nav button { padding: 0.45em 0.7em; }
+.level-name { font-weight: 700; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- dialogs ---------- */
+.dlg { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; width: min(440px, 92vw); }
+.dlg.wide { width: min(980px, 94vw); max-height: 90vh; }
+.dlg::backdrop { background: #0009; }
+.dlg h2 { margin: 0 0 12px; }
+.dlg input[type="text"] { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0.55em 0.7em; color: var(--text); font-size: 1rem; }
+.row.end { justify-content: flex-end; margin-top: 14px; }
+.import-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; max-height: 60vh; overflow-y: auto; }
+.import-item { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.import-item.skip { opacity: 0.45; }
+.import-item canvas { width: 100%; aspect-ratio: 1000 / 707; background: #fff; border-radius: 6px; display: block; }
+.import-item input[type="text"] { width: 100%; font-size: 0.92rem; padding: 0.4em 0.5em; }
+.import-item .badge { font-size: 0.8rem; color: var(--run); }
+.import-item .badge.warn { color: var(--warn); }
+.import-item .row { gap: 6px; }
+.import-item .row button, .import-item .row label { font-size: 0.85rem; padding: 0.35em 0.6em; }
+.import-item label.inc { display: flex; align-items: center; gap: 6px; color: var(--muted); margin-left: auto; }

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Level Sheet</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <style>
+    @page { size: A4 landscape; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #e9e9ee; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111; }
+
+    .screen-note { max-width: 820px; margin: 24px auto 16px; padding: 0 16px; }
+    .screen-note h1 { font-size: 1.4rem; margin: 0 0 6px; }
+    .screen-note p { margin: 4px 0; color: #444; }
+    .screen-note button { font: inherit; padding: 0.55em 1.2em; border: 0; border-radius: 10px; background: #19c3ff; color: #032636; font-weight: 700; cursor: pointer; margin-top: 8px; }
+
+    /* One A4 landscape page. All positions in mm. */
+    .sheet {
+      width: 297mm; height: 210mm; margin: 0 auto 24px; background: #fff; position: relative;
+      box-shadow: 0 4px 24px #0002;
+    }
+    .header {
+      position: absolute; left: 12mm; right: 12mm; top: 8mm; height: 13mm;
+      display: flex; align-items: center; gap: 6mm; font-size: 3.6mm;
+    }
+    .field { display: flex; align-items: flex-end; gap: 2mm; white-space: nowrap; }
+    .field span.line { display: inline-block; border-bottom: 0.3mm solid #999; height: 5mm; }
+    .key { display: flex; gap: 2.5mm; margin-left: auto; font-size: 2.9mm; color: #333; }
+    .key i { display: inline-block; width: 3mm; height: 3mm; border-radius: 0.6mm; vertical-align: -0.4mm; margin-right: 0.8mm; }
+    .scale { display: flex; align-items: flex-end; gap: 1.5mm; font-size: 2.6mm; color: #666; }
+
+    /* Drawing area: exactly the game's shape (1 : 1.414). Corner squares sit just outside it. */
+    .area { position: absolute; left: 38.2mm; top: 35mm; width: 220.6mm; height: 156mm; }
+    .area .frame { position: absolute; inset: 0; border: 0.25mm dashed #d9d9d9; }
+    .mark { position: absolute; width: 12mm; height: 12mm; background: #000; }
+    .mark.tl { left: -12mm; top: -12mm; }
+    .mark.tr { right: -12mm; top: -12mm; }
+    .mark.br { right: -12mm; bottom: -12mm; }
+    .mark.bl { left: -12mm; bottom: -12mm; }
+    .hint { position: absolute; left: 0; right: 0; bottom: -9mm; text-align: center; font-size: 2.6mm; color: #9a9a9a; }
+
+    @media print {
+      html, body { background: #fff; }
+      .screen-note { display: none; }
+      .sheet { margin: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-note">
+    <h1>Printable level sheet</h1>
+    <p>Print in <b>landscape</b> on A4 or A3 (black and white is fine). Kids draw their level inside the frame.</p>
+    <p>The four black squares let the game crop scans, photos and the webcam view automatically, so don't draw on or cover them.</p>
+    <button onclick="window.print()">Print</button>
+  </div>
+
+  <div class="sheet">
+    <div class="header">
+      <div class="field">Name <span class="line" style="width:48mm"></span></div>
+      <div class="field">Level name <span class="line" style="width:52mm"></span></div>
+      <div class="scale" title="The character and its jump, at the size they appear on this sheet">
+        <svg width="16mm" height="24mm" viewBox="0 0 16 24" aria-hidden="true">
+          <!-- 1 unit = 1 mm. Character is 9.3 mm tall; a jump reaches 21.8 mm. -->
+          <g stroke="#e0157f" stroke-width="0.9" stroke-linecap="round" fill="none">
+            <circle cx="4.5" cy="15.9" r="1.4" fill="#fff"/>
+            <line x1="4.5" y1="17.3" x2="4.5" y2="19.9"/>
+            <line x1="4.5" y1="19.9" x2="3.3" y2="23.8"/><line x1="4.5" y1="19.9" x2="5.7" y2="23.8"/>
+            <line x1="4.5" y1="18" x2="3" y2="20"/><line x1="4.5" y1="18" x2="6" y2="20"/>
+          </g>
+          <g stroke="#888" stroke-width="0.4" fill="none">
+            <line x1="11" y1="2" x2="11" y2="23.8"/><line x1="9.5" y1="2" x2="12.5" y2="2"/><line x1="9.5" y1="23.8" x2="12.5" y2="23.8"/>
+          </g>
+        </svg>
+        <span>Character size<br>and jump height</span>
+      </div>
+      <div class="key">
+        <span><i style="background:#161616"></i>Ground</span>
+        <span><i style="background:#1f5fd1"></i>Bouncy</span>
+        <span><i style="background:#cf2e2e"></i>Danger</span>
+        <span><i style="background:#1e9a4b"></i>Goal</span>
+        <span><i style="background:#f28a1c;border-radius:50%"></i>Coins</span>
+      </div>
+    </div>
+
+    <div class="area">
+      <div class="frame"></div>
+      <div class="mark tl"></div><div class="mark tr"></div>
+      <div class="mark br"></div><div class="mark bl"></div>
+      <div class="hint">Draw inside the frame. Don't draw on the black squares.</div>
+    </div>
+  </div>
+</body>
+</html>

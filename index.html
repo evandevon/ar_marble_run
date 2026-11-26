@@ -29,6 +29,11 @@
           <span class="mode-name">Screen mode</span>
           <span class="mode-desc">Play over the camera view on the front screen.</span>
         </button>
+        <button class="mode-card" id="btn-library">
+          <span class="mode-icon" aria-hidden="true">📚</span>
+          <span class="mode-name">Class levels</span>
+          <span class="mode-desc">Play saved levels, or add scanned drawings (PDF or photos).</span>
+        </button>
         <button class="mode-card" disabled aria-disabled="true">
           <span class="mode-icon" aria-hidden="true">📽️</span>
           <span class="mode-name">Projector mode</span>
@@ -41,6 +46,8 @@
         <button class="link" id="btn-demo">Try the demo level</button>
         <span aria-hidden="true">·</span>
         <label class="link" for="photo-input" tabindex="0">Use a photo of a drawing</label>
+        <span aria-hidden="true">·</span>
+        <a class="link" href="template.html" target="_blank" rel="noopener">Print level sheets</a>
         <input type="file" id="photo-input" accept="image/*" hidden>
       </div>
       <p class="version" id="version"></p>
@@ -75,9 +82,10 @@
 
       <div class="step">
         <h3><span class="num">2</span> Corners</h3>
-        <p class="hint">Click the four corners of the drawing area, in any order. Drag a dot to adjust it.</p>
+        <p class="hint">Using the printed level sheet? Press <b>Find corner marks</b>. Otherwise click the four corners of the drawing area, in any order, and drag a dot to adjust it.</p>
         <p class="corner-count" id="corner-count" role="status">0 of 4 corners</p>
         <div class="row">
+          <button id="btn-find-marks" class="secondary" title="Use the black corner squares on the printed level sheet">🔍 Find corner marks</button>
           <button id="btn-reset-corners" class="secondary">Clear corners</button>
           <button id="btn-saved-corners" class="secondary" hidden>Use last setup</button>
         </div>
@@ -85,6 +93,30 @@
 
       <button id="btn-play" class="primary big" disabled>Start →</button>
     </aside>
+  </section>
+
+  <!-- ============ LIBRARY ============ -->
+  <section id="library" class="screen" aria-labelledby="lib-title">
+    <div class="lib-inner">
+      <header class="lib-head">
+        <button class="link back" data-goto="start">← Back</button>
+        <h2 id="lib-title">Class levels</h2>
+        <div class="lib-actions">
+          <label class="primary btn" for="scan-input" tabindex="0">＋ Add scans (PDF or photos)</label>
+          <input type="file" id="scan-input" accept="application/pdf,image/*" multiple hidden>
+          <a class="secondary btn" href="template.html" target="_blank" rel="noopener">🖨 Print level sheets</a>
+          <button id="btn-export" class="secondary">⬇ Export library</button>
+          <label class="secondary btn" for="lib-file-input" tabindex="0">⬆ Import library file</label>
+          <input type="file" id="lib-file-input" accept=".json,application/json" hidden>
+        </div>
+      </header>
+      <p class="lib-note">Levels are saved in this browser on this computer. Use <b>Export library</b> to copy them to Google Drive or Classroom, and <b>Import library file</b> on another computer.</p>
+      <div class="lib-empty" id="lib-empty" hidden>
+        <p><b>No levels yet.</b></p>
+        <p>Save a level from the camera (the 💾 <b>Save level</b> button while building), or add scans: print the level sheets, let the class draw, scan the pile on the photocopier as one PDF, and add it here.</p>
+      </div>
+      <ul class="lib-grid" id="lib-grid"></ul>
+    </div>
   </section>
 
   <!-- ============ GAME ============ -->
@@ -130,6 +162,11 @@
       <button id="btn-mode" class="primary run" title="Enter">▶ Play</button>
       <button id="btn-restart" class="secondary" title="R" hidden>↻ Restart</button>
       <span class="mode-pill" id="mode-pill">BUILD</span>
+      <div class="level-nav" id="level-nav" hidden>
+        <button id="btn-prev-level" class="secondary" title="Previous level (PageUp)" aria-label="Previous level">◀</button>
+        <span class="level-name" id="level-name"></span>
+        <button id="btn-next-level" class="secondary" title="Next level (PageDown)" aria-label="Next level">▶</button>
+      </div>
       <span class="hint-inline" id="hint-inline">Draw, then press Play. Click the paper to move the start flag.</span>
 
       <div class="spacer"></div>
@@ -142,6 +179,8 @@
         <li title="Coins"><span class="chip coin"></span><span id="n-coin">0</span></li>
       </ul>
 
+      <button id="btn-save" class="secondary" title="Save this level to Class levels">💾 Save</button>
+      <button id="btn-levels" class="secondary" title="Class levels">📚</button>
       <button id="btn-fix" class="secondary" aria-pressed="false" title="Click mistakes to correct colours">🎨 Fix colours</button>
       <details class="tune">
         <summary>Tune</summary>
@@ -170,6 +209,33 @@
       <button id="btn-full" class="secondary" title="F" aria-label="Fullscreen">⛶</button>
     </div>
   </section>
+
+  <!-- Save level dialog -->
+  <dialog id="save-dialog" class="dlg">
+    <form method="dialog" id="save-form">
+      <h2>Save level</h2>
+      <label class="field">Level name (e.g. the student's name)
+        <input type="text" id="save-name" maxlength="80" required autocomplete="off">
+      </label>
+      <p class="hint small">Saves the drawing and the start flag to Class levels on this computer.</p>
+      <div class="row end">
+        <button value="cancel" class="secondary" formnovalidate>Cancel</button>
+        <button value="new" id="save-as-new" class="secondary" hidden>Save as new</button>
+        <button value="save" id="save-ok" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Import review -->
+  <dialog id="import-dialog" class="dlg wide">
+    <h2>Add scanned levels</h2>
+    <p class="hint" id="import-status" role="status">Reading files…</p>
+    <ul class="import-list" id="import-list"></ul>
+    <div class="row end">
+      <button id="import-cancel" class="secondary">Cancel</button>
+      <button id="import-ok" class="primary" disabled>Add levels</button>
+    </div>
+  </dialog>
 
   <script type="module" src="js/main.js"></script>
 </body>

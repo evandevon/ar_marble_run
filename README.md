@@ -4,6 +4,10 @@ Draw a level with whiteboard markers on paper (or a mini whiteboard). A webcam l
 
 **Play it:** https://evandevon.github.io/ar_marble_run/
 
+## Printable level sheet
+
+Print **[template.html](template.html)** (landscape, A4 or A3, black and white is fine). It has a frame the exact shape of the game, a name line, the colour key, and a true-size picture of the character and its jump height. The four black corner squares let the game crop scans, photos and the webcam view automatically.
+
 ## Marker colours
 
 | Marker | Becomes |
@@ -36,6 +40,19 @@ No camera? Try the built-in demo level, or a photo of a drawing.
 7. Press **Start**. The setup is remembered for next time (**Use last setup**).
 
 Thick markers work best; pencil is ignored on purpose.
+
+## Class levels
+
+Open **📚 Class levels** from the start screen.
+
+- **Save from the camera:** while building, press **💾 Save** and type a name (e.g. the student's name). Each level keeps the drawing and its start flag.
+- **Add scans:** print level sheets, let the class draw, scan the whole pile on the photocopier as one PDF (in colour), and press **＋ Add scans**. Each page becomes a level. Sheets are cropped and turned the right way up automatically using the corner squares; you just name each one. Photos work too (several at once), and plain paper without corner squares is added as a whole page.
+- **Play:** choose a level, or use ◀ ▶ (PageUp / PageDown) to move through the class's levels. Clicking a new start flag is remembered for that level.
+- **Share between computers:** **⬇ Export library** saves every level in one file. Put it in Google Drive or Classroom, then **⬆ Import library file** on another computer.
+
+Levels are stored in that browser on that computer. Private/incognito windows may not keep them.
+
+With the webcam, **🔍 Find corner marks** in setup uses the sheet's corner squares instead of clicking corners.
 
 ## Fixing colours
 
@@ -73,10 +90,13 @@ Fixes are colour examples, so one fix covers every mark in that marker, and any 
 | `js/stickman.js` | The animated stick figure |
 | `js/effects.js` | Particles and synthesised sound effects |
 | `js/render.js` | Draws everything |
+| `js/library.js` | Class levels saved in the browser (IndexedDB), export and import |
+| `js/importer.js` | Reads PDFs (pdf.js) and photos, crops and straightens each page |
+| `js/markers.js` | Finds the level sheet's corner squares |
 | `js/main.js` | Screens, setup, controls and the game loop |
 | `js/marble/` | The earlier marble-run prototype, parked for a possible physics mode |
 
-Everything runs in the browser. There is no server and nothing leaves the computer.
+Everything runs in the browser. There is no server and nothing leaves the computer. PDF reading uses [pdf.js](https://mozilla.github.io/pdf.js/) (Apache 2.0), included in `lib/pdfjs/`.
 
 ## Hosting
 
