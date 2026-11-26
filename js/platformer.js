@@ -9,7 +9,6 @@ export const PLAYER = {
   h: 42,            // hitbox height
   gravity: 0.5,
   jumpV: 10.2,      // ~104 px jump height
-  bounceV: 14.5,    // trampoline launch (~210 px)
   runMax: 4.2,
   accel: 0.55,
   airAccel: 0.32,
@@ -19,6 +18,8 @@ export const PLAYER = {
   coyote: 6,        // frames you can still jump after running off a ledge
   buffer: 7,        // frames a jump press is remembered before landing
 };
+// Trampolines launch you 50% higher than a normal jump (height grows with speed squared).
+PLAYER.bounceV = PLAYER.jumpV * Math.sqrt(1.5);
 
 export class Level {
   constructor(det, W, H) {

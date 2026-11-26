@@ -185,11 +185,11 @@ export function makeDemoDrawing() {
   p.strokeStyle = INK.black;
   wobbly([[30, 600], [270, 600]], 10);               // starting ground
   wobbly([[400, 598], [560, 568]], 10);              // gentle slope
-  wobbly([[730, 455], [920, 455]], 10);              // high ledge (reach it with the trampoline)
-  wobbly([[560, 375], [680, 375]], 10);
-  wobbly([[310, 315], [480, 315]], 10);
-  wobbly([[60, 255], [230, 255]], 10);               // goal ledge
-  wobbly([[920, 455], [925, 380]], 9);               // little wall at the ledge end
+  wobbly([[730, 480], [920, 480]], 10);              // high ledge (reach it with the trampoline)
+  wobbly([[560, 395], [680, 395]], 10);
+  wobbly([[310, 330], [480, 330]], 10);
+  wobbly([[60, 270], [230, 270]], 10);               // goal ledge
+  wobbly([[920, 480], [925, 405]], 9);               // little wall at the ledge end
 
   // Lava pit
   const lava = [[285, 690]];
@@ -197,19 +197,19 @@ export function makeDemoDrawing() {
   lava.push([385, 690]);
   fillPoly(lava, INK.red);
   // Spikes
-  fillPoly([[378, 312], [387, 292], [396, 312], [405, 292], [414, 312]], INK.red);
+  fillPoly([[378, 327], [387, 307], [396, 327], [405, 307], [414, 327]], INK.red);
 
   // Trampoline
   p.strokeStyle = INK.blue;
-  wobbly([[615, 640], [705, 640]], 13);
+  wobbly([[612, 615], [702, 615]], 13);
 
   // Goal flag
   p.strokeStyle = INK.green;
-  wobbly([[112, 250], [112, 170]], 7);
-  fillPoly([[112, 168], [165, 184], [112, 202]], INK.green);
+  wobbly([[112, 265], [112, 185]], 7);
+  fillPoly([[112, 183], [165, 199], [112, 217]], INK.green);
 
   // Coins
-  for (const [x, y] of [[335, 535], [790, 410], [850, 410], [396, 250]]) dot(x, y, 10, INK.orange);
+  for (const [x, y] of [[335, 535], [790, 440], [850, 440], [396, 265]]) dot(x, y, 10, INK.orange);
 
   // Faint pencil smudge that should be ignored
   p.fillStyle = 'rgba(0,0,0,0.08)';
