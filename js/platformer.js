@@ -88,6 +88,7 @@ export class Player {
     this.onGround = false;
     this.jumping = false;
     this.bouncing = false;   // rising from a trampoline, boost not used yet
+    this.airborneFromBounce = false;  // in the air after a bounce (until landing)
     this.bounceFromY = 0;
     this.coyote = 0;
     this.buffer = 0;
@@ -125,6 +126,12 @@ export class Player {
     // Trampoline boost: press jump on the way up. Earlier = higher.
     if (this.bouncing && this.vy < 0 && input.jumpPressed) this.boost(events);
     if (this.vy >= 0) this.bouncing = false;
+    // Hard limit: nothing can carry a bounce above the trampoline's maximum height.
+    if (this.airborneFromBounce && this.vy < 0) {
+      const allowed = P.bounceMax * P.jumpHeight - (this.bounceFromY - this.y);
+      if (allowed <= 0) this.vy = 0;
+      else if (heightFor(-this.vy) > allowed) this.vy = -speedFor(allowed);
+    }
     this.buffer--;
     // Let go early for a small hop.
     if (this.jumping && !input.jumpHeld && this.vy < -3.5) this.vy = -3.5;
@@ -207,6 +214,7 @@ export class Player {
       this.jumping = false;
       this.coyote = 0;           // no normal jump in mid-air after a bounce
       this.bouncing = true;
+      this.airborneFromBounce = true;
       this.bounceFromY = this.y;
       this.squash = -0.35;
       events.push({ type: 'bounce', x: this.x, y: this.y });
@@ -221,6 +229,7 @@ export class Player {
     this.vy = 0;
     this.onGround = true;
     this.jumping = false;
+    this.airborneFromBounce = false;
   }
 }
 

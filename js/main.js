@@ -13,7 +13,9 @@ const STORE_KEY = 'paper-platformer.calibration.v2';
 const SETTINGS_KEY = 'paper-platformer.settings.v1';
 const STEP_MS = 1000 / 60;
 
+const VERSION = '2026-11-26.7';
 const $ = (id) => document.getElementById(id);
+document.getElementById('version').textContent = `Version ${VERSION}`;
 
 const app = {
   source: null,

@@ -166,3 +166,4 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 8p
 .fix-menu button:hover, .fix-menu button:focus-visible { background: var(--panel-2); }
 .fix-menu button.current { outline: 1px dashed var(--muted); }
 .fix-menu .fix-cancel { color: var(--muted); justify-content: center; }
+.version { margin-top: 28px; color: var(--muted); font-size: 0.8rem; opacity: 0.7; }
