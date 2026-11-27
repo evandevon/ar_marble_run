@@ -1,10 +1,6 @@
 // Reads the flattened paper image and works out what each marker colour drew.
-//
-//   black          -> solid ground and walls
-//   blue           -> bouncy (trampoline)
-//   red            -> danger (lava, spikes)
-//   green          -> goal
-//   orange/yellow  -> coins
+// It only knows colours: black, blue, red, green and orange (orange includes
+// yellow). Each game decides what the colours mean (see js/games/index.js).
 //
 // Colours are matched to the nearest example colour: built-in marker colours plus
 // any fixes the teacher has made by clicking mistakes. That lets the game adapt
@@ -12,7 +8,7 @@
 //
 // Pipeline: average-downsample -> normalise against local paper colour ->
 //           classify each pixel -> clean up fringes -> join gaps ->
-//           connected components -> outlines, coins and per-type masks.
+//           connected components -> outlines, blobs and a mask per colour.
 
 export const DEFAULT_VISION = {
   sensitivity: 0.62,  // black: darker than this fraction of paper brightness
@@ -21,18 +17,21 @@ export const DEFAULT_VISION = {
   minArea: 18,        // ignore specks smaller than this (detection px)
   margin: 4,          // ignore a thin border around the paper edge
   scale: 2,           // detection runs at 1/scale of the world resolution
-  samples: [],        // colour fixes from the teacher: [{ type, r, g, b }] (type may be 'ignore')
+  samples: [],        // colour fixes from the teacher: [{ type: colour, r, g, b }] (type may be 'ignore')
 };
 
-export const TYPES = ['solid', 'bouncy', 'hazard', 'goal', 'coin'];
+export const COLOURS = ['black', 'blue', 'red', 'green', 'orange'];
+
+// Fix colours used to store game meanings; these map them to colours.
+export const LEGACY_TYPES = { solid: 'black', bouncy: 'blue', hazard: 'red', goal: 'green', coin: 'orange' };
 
 // Built-in examples of common whiteboard markers and textas, measured after the
 // paper has been normalised to white (240). Teacher fixes are added on top.
 const BUILT_IN = [
-  ['hazard', 205, 55, 55], ['hazard', 170, 45, 55], ['hazard', 225, 70, 95],
-  ['coin', 238, 140, 45], ['coin', 240, 170, 50], ['coin', 238, 215, 70],
-  ['goal', 45, 150, 75], ['goal', 35, 145, 125], ['goal', 110, 185, 70],
-  ['bouncy', 45, 85, 195], ['bouncy', 60, 95, 160], ['bouncy', 40, 130, 210],
+  ['red', 205, 55, 55], ['red', 170, 45, 55], ['red', 225, 70, 95],
+  ['orange', 238, 140, 45], ['orange', 240, 170, 50], ['orange', 238, 215, 70],
+  ['green', 45, 150, 75], ['green', 35, 145, 125], ['green', 110, 185, 70],
+  ['blue', 45, 85, 195], ['blue', 60, 95, 160], ['blue', 40, 130, 210],
 ];
 
 // ---------- mask helpers ----------
@@ -179,8 +178,8 @@ function feat(r, g, b) {
   return [0.299 * r + 0.587 * g + 0.114 * b, (r - g) * 0.7071, (r + g - 2 * b) * 0.4082];
 }
 const L_WEIGHT = 0.35;
-const TYPE_CODE = { none: 0, solid: 1, bouncy: 2, hazard: 3, goal: 4, coin: 5 };
-const CODE_TYPE = ['none', 'solid', 'bouncy', 'hazard', 'goal', 'coin'];
+const TYPE_CODE = { none: 0, black: 1, blue: 2, red: 3, green: 4, orange: 5 };
+const CODE_TYPE = ['none', 'black', 'blue', 'red', 'green', 'orange'];
 
 // Look-up table from (quantised) colour to game type, rebuilt only when settings change.
 let lutCache = { key: '', lut: null };
@@ -190,11 +189,12 @@ function getLUT(o) {
   const blackL = 2 * 240 * o.sensitivity - 240;       // paper/black midpoint sits at 240 x sensitivity
   const protos = [
     { type: 'none', f: feat(240, 240, 240), w: 1 },     // paper
-    { type: 'solid', f: [Math.max(0, blackL), 0, 0], w: 1 },
-    { type: 'solid', f: [Math.max(0, blackL - 40), 0, 0], w: 1 },
+    { type: 'black', f: [Math.max(0, blackL), 0, 0], w: 1 },
+    { type: 'black', f: [Math.max(0, blackL - 40), 0, 0], w: 1 },
     ...BUILT_IN.map(([type, r, g, b]) => ({ type, f: feat(r, g, b), w: 1 })),
     // Teacher fixes win ties with the built-in examples.
-    ...o.samples.map((sm) => ({ type: sm.type === 'ignore' ? 'none' : sm.type, f: feat(sm.r, sm.g, sm.b), w: 0.8 })),
+    ...o.samples.filter((sm) => sm.type === 'ignore' || TYPE_CODE[sm.type])
+      .map((sm) => ({ type: sm.type === 'ignore' ? 'none' : sm.type, f: feat(sm.r, sm.g, sm.b), w: 0.8 })),
   ];
   const maxD2 = o.colourMatch * o.colourMatch;
   const lut = new Uint8Array(32 * 32 * 32);
@@ -235,12 +235,12 @@ export function sampleColours(det, x, y, radius = 12) {
   return picks.map(([r2, g2, b2]) => ({ r: Math.round(r2), g: Math.round(g2), b: Math.round(b2) }));
 }
 
-// What the detector currently thinks is at a point (nearest type within a radius).
-export function typeAt(det, x, y, radius = 10) {
+// Which colour the detector currently sees at a point (nearest within a radius).
+export function colourAt(det, x, y, radius = 10) {
   const s = det.scale, r = Math.round(radius / s);
   const cx = Math.round(x / s), cy = Math.round(y / s);
   let best = null, bestD = Infinity;
-  for (const t of TYPES) {
+  for (const t of COLOURS) {
     const m = det.masks[t];
     for (let yy = cy - r; yy <= cy + r; yy++) for (let xx = cx - r; xx <= cx + r; xx++) {
       if (xx < 0 || yy < 0 || xx >= det.w || yy >= det.h || !m[yy * det.w + xx]) continue;
@@ -307,7 +307,8 @@ export function detectLevel(img, opts = {}) {
   });
 
   // 3. Classify every pixel
-  const raw = { solid: new Uint8Array(n), bouncy: new Uint8Array(n), hazard: new Uint8Array(n), goal: new Uint8Array(n), coin: new Uint8Array(n) };
+  const raw = {};
+  for (const c of COLOURS) raw[c] = new Uint8Array(n);
   const anyColour = new Uint8Array(n);
   const norm = new Uint8Array(n * 3);   // kept so the teacher can fix colours by clicking
   const lut = getLUT(o);
@@ -330,30 +331,28 @@ export function detectLevel(img, opts = {}) {
   }
 
   // 4. Clean up: edges where black meets colour produce misleading fringes.
-  const blackNear = dilate(raw.solid, w, h, 1);
+  const blackNear = dilate(raw.black, w, h, 1);
   const colourNear = dilate(anyColour, w, h, 1);
   const cleaned = {
-    solid: close(andNot(raw.solid, colourNear), w, h, Math.round(o.gapFill)),
+    black: close(andNot(raw.black, colourNear), w, h, Math.round(o.gapFill)),
   };
-  for (const t of ['bouncy', 'hazard', 'goal', 'coin']) cleaned[t] = close(andNot(raw[t], blackNear), w, h, 1);
-  // A colour can't also be ground.
-  cleaned.solid = andNot(cleaned.solid, cleaned.bouncy);
-  // Darker edges of orange coins can read as red: never let them become danger.
-  cleaned.hazard = andNot(cleaned.hazard, dilate(cleaned.coin, w, h, 3));
+  for (const t of ['blue', 'red', 'green', 'orange']) cleaned[t] = close(andNot(raw[t], blackNear), w, h, 1);
+  // A blue line can't also be black.
+  cleaned.black = andNot(cleaned.black, cleaned.blue);
+  // The darker edges of orange marks can read as red: they never count as red.
+  cleaned.red = andNot(cleaned.red, dilate(cleaned.orange, w, h, 3));
 
-  // 5. Components per type
+  // 5. Components per colour. Orange is often drawn as small dots, so smaller marks count.
   const masks = {};
   const outlines = [];
-  const coins = [];
+  const blobs = {};
   const counts = {};
-  for (const t of TYPES) {
-    const { mask, blobs } = components(cleaned[t], w, h, t === 'coin' ? Math.max(6, o.minArea / 2) : o.minArea, s);
-    masks[t] = mask;
-    counts[t] = blobs.length;
-    for (const b of blobs) {
-      outlines.push({ type: t, points: b.points });
-      if (t === 'coin') coins.push({ x: b.cx, y: b.cy, r: Math.max(9, Math.min(18, Math.sqrt(b.area / Math.PI))) });
-    }
+  for (const t of COLOURS) {
+    const res = components(cleaned[t], w, h, t === 'orange' ? Math.max(6, o.minArea / 2) : o.minArea, s);
+    masks[t] = res.mask;
+    counts[t] = res.blobs.length;
+    blobs[t] = res.blobs.map((b) => ({ x: b.cx, y: b.cy, area: b.area, points: b.points }));
+    for (const b of res.blobs) outlines.push({ type: t, points: b.points });
   }
-  return { w, h, scale: s, masks, outlines, coins, counts, norm };
+  return { w, h, scale: s, masks, outlines, blobs, counts, norm };
 }

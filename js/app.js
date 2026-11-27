@@ -1,13 +1,18 @@
-import { computeHomography, warpImage } from './homography.js';
-import { detectLevel, sampleColours, typeAt, DEFAULT_VISION } from './vision.js';
-import { Level, Game } from './platformer.js';
-import { Effects, Sfx } from './effects.js';
-import { WebcamSource, ImageSource, listCameras, loadImageFile, makeDemoDrawing } from './camera.js';
-import { drawScene, buildCleanImage } from './render.js';
-import * as Library from './library.js';
-import { readFiles, flattenPage, flattenPlain, rotateCanvas, shrink } from './importer.js';
-import { findCornerMarks } from './markers.js';
-import { TouchControls } from './touch.js';
+// The app shell: start screen, camera setup, scanning, class levels, Fix colours,
+// controls and the game loop. Everything game-specific lives in js/games/.
+
+import { computeHomography, warpImage } from './core/homography.js';
+import { detectLevel, sampleColours, colourAt, DEFAULT_VISION, LEGACY_TYPES } from './core/vision.js';
+import { COLOUR_INFO, COLOUR_IDS, buildCleanImage, drawOutlines } from './core/colours.js';
+import { Effects, Sfx } from './core/effects.js';
+import { drawHud } from './core/hud.js';
+import { WebcamSource, ImageSource, listCameras, loadImageFile } from './core/camera.js';
+import * as Library from './core/library.js';
+import { readFiles, flattenPage, flattenPlain, rotateCanvas, shrink } from './core/importer.js';
+import { findCornerMarks } from './core/markers.js';
+import { TouchControls } from './core/touch.js';
+import { Input, GAME_KEYS, padButtonsPressed } from './core/input.js';
+import { GAMES, COMING_SOON, getGame } from './games/index.js';
 
 // The game world is the flattened paper, in "paper pixels" (A-series ratio).
 const WORLD_W = 1000;
@@ -16,8 +21,9 @@ const SCAN_INTERVAL_MS = 120;
 const STORE_KEY = 'paper-platformer.calibration.v2';
 const SETTINGS_KEY = 'paper-platformer.settings.v1';
 const STEP_MS = 1000 / 60;
+const LAST_GAME_KEY = 'paper-arcade.game';
 
-const VERSION = '2026-11-27.1';
+const VERSION = '2026-11-27.2';
 const $ = (id) => document.getElementById(id);
 document.getElementById('version').textContent = `Version ${VERSION}`;
 
@@ -29,7 +35,8 @@ const app = {
   view: 'camera',         // camera | clean
   vision: { ...DEFAULT_VISION, samples: [] },
   orient: { rotate: 0, flipH: false, flipV: false },
-  maxLives: 3,
+  gameDef: GAMES[0],       // the chosen game module (js/games/…)
+  gameSettings: {},       // per game: { [gameId]: { settingId: value } }
   touchMode: 'auto',      // on-screen controls: auto | on | off
   sawTouch: false,        // a finger has touched the screen this session
   currentLevelId: null,   // set while playing a saved level
@@ -38,7 +45,7 @@ const app = {
   fixUndo: [],            // number of samples added by each fix, for undo
   pendingFix: null,       // { x, y, samples } waiting for the teacher to choose a type
   det: null,              // latest detection result
-  game: null,
+  session: null,          // the game being played (null while building)
   start: { x: 80, y: 560 },
   effects: new Effects(),
   sfx: new Sfx(),
@@ -55,21 +62,126 @@ function loadSettings() {
     const st = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
     if (!st) return;
     if (st.orient) app.orient = { ...app.orient, ...st.orient };
-    if (Array.isArray(st.samples)) app.vision.samples = st.samples;
+    // Older versions stored fixes by platformer meaning (e.g. 'solid'); convert them to colours.
+    if (Array.isArray(st.samples)) app.vision.samples = st.samples.map((x) => ({ ...x, type: LEGACY_TYPES[x.type] || x.type }));
     if (st.colourMatch) app.vision.colourMatch = st.colourMatch;
-    if (st.lives) app.maxLives = st.lives === 'Infinity' ? Infinity : +st.lives;
+    if (st.gameSettings && typeof st.gameSettings === 'object') app.gameSettings = st.gameSettings;
+    else if (st.lives) app.gameSettings = { platformer: { lives: String(st.lives) } };
     if (['auto', 'on', 'off'].includes(st.touchMode)) app.touchMode = st.touchMode;
   } catch { /* storage unavailable */ }
 }
 function saveSettings() {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-      orient: app.orient, samples: app.vision.samples, colourMatch: app.vision.colourMatch, lives: String(app.maxLives),
-      touchMode: app.touchMode,
+      orient: app.orient, samples: app.vision.samples, colourMatch: app.vision.colourMatch,
+      gameSettings: app.gameSettings, touchMode: app.touchMode,
     }));
   } catch { /* storage unavailable */ }
 }
 loadSettings();
+
+// ---------------------------------------------------------------- choosing a game
+// Colours the current game uses, in the standard order.
+const usedColours = () => COLOUR_IDS.filter((c) => app.gameDef.colours[c]);
+
+function settingsFor(game) {
+  const saved = app.gameSettings[game.id] || {};
+  const out = {};
+  for (const st of game.settings || []) out[st.id] = saved[st.id] ?? st.value;
+  return out;
+}
+
+function chooseGame(id, { remember = true } = {}) {
+  app.gameDef = getGame(id);
+  if (remember) { try { localStorage.setItem(LAST_GAME_KEY, app.gameDef.id); } catch { /* ignore */ } }
+  const g = app.gameDef;
+  document.title = `${g.name} · Paper Arcade`;
+  document.querySelectorAll('.game-card[data-game]').forEach((c) => c.setAttribute('aria-checked', String(c.dataset.game === g.id)));
+  $('game-tagline').textContent = g.tagline;
+  // Colour key on the start screen
+  $('legend').innerHTML = '';
+  for (const c of usedColours()) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="chip ${c}"></span><b>${COLOUR_INFO[c].name}</b> <span></span>`;
+    li.lastElementChild.textContent = g.colours[c].toLowerCase();
+    $('legend').appendChild(li);
+  }
+  // Toolbar counts
+  $('legend-mini').innerHTML = '';
+  for (const c of usedColours()) {
+    const li = document.createElement('li');
+    li.title = `${COLOUR_INFO[c].name}: ${g.colours[c]}`;
+    li.innerHTML = `<span class="chip ${c}"></span><span id="n-${c}">0</span>`;
+    $('legend-mini').appendChild(li);
+  }
+  // Fix colours menu: every colour, labelled with what it means in this game
+  $('fix-items').innerHTML = '';
+  for (const c of COLOUR_IDS) {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'menuitem');
+    b.dataset.type = c;
+    b.innerHTML = `<span class="chip ${c}"></span><span></span>`;
+    b.lastElementChild.textContent = g.colours[c] ? `${COLOUR_INFO[c].name}: ${g.colours[c]}` : `${COLOUR_INFO[c].name} (not used in this game)`;
+    b.addEventListener('click', () => applyFix(c));
+    $('fix-items').appendChild(b);
+  }
+  // Game options under Tune
+  const box = $('game-settings');
+  box.innerHTML = '';
+  const current = settingsFor(g);
+  for (const st of g.settings || []) {
+    const label = document.createElement('label');
+    label.className = 'slider';
+    label.textContent = st.label + ' ';
+    const sel = document.createElement('select');
+    for (const [v, text] of st.options) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = text;
+      sel.appendChild(o);
+    }
+    sel.value = current[st.id];
+    sel.addEventListener('change', () => {
+      app.gameSettings[g.id] = { ...(app.gameSettings[g.id] || {}), [st.id]: sel.value };
+      saveSettings();
+      if (app.session) setMode('play');   // restart with the new setting
+    });
+    label.appendChild(sel);
+    box.appendChild(label);
+  }
+  $('lib-title').textContent = `Class levels: ${g.name}`;
+  app.start = { ...g.defaultStart };
+}
+
+function renderGamePicker() {
+  const box = $('game-picker');
+  box.innerHTML = '';
+  for (const g of GAMES) {
+    const b = document.createElement('button');
+    b.className = 'game-card';
+    b.dataset.game = g.id;
+    b.setAttribute('role', 'radio');
+    b.innerHTML = `<span class="g-icon" aria-hidden="true">${g.icon}</span><span class="g-name"></span>`;
+    b.querySelector('.g-name').textContent = g.name;
+    b.addEventListener('click', () => chooseGame(g.id));
+    box.appendChild(b);
+  }
+  for (const g of COMING_SOON) {
+    const b = document.createElement('button');
+    b.className = 'game-card';
+    b.disabled = true;
+    b.title = g.tagline;
+    b.innerHTML = `<span class="g-icon" aria-hidden="true">${g.icon}</span><span class="g-name"></span><span class="g-soon">Coming soon</span>`;
+    b.querySelector('.g-name').textContent = g.name;
+    box.appendChild(b);
+  }
+}
+renderGamePicker();
+{
+  // ?game=… in the link picks the game (handy for sharing); otherwise the last one used.
+  let id = new URLSearchParams(location.search).get('game');
+  if (!id) { try { id = localStorage.getItem(LAST_GAME_KEY); } catch { /* ignore */ } }
+  chooseGame(id || GAMES[0].id, { remember: false });
+}
 
 // ---------------------------------------------------------------- screens
 const isActive = (id) => $(id).classList.contains('active');
@@ -97,7 +209,7 @@ $('btn-screen').addEventListener('click', async () => {
 });
 
 $('btn-demo').addEventListener('click', () => {
-  const demo = makeDemoDrawing();
+  const demo = app.gameDef.makeDemo();
   app.source = new ImageSource(demo.canvas);
   app.start = demo.start;
   updateOrientButtons();
@@ -347,8 +459,8 @@ function scan(force = false) {
   warpImage(frame, app.H, WORLD_W, WORLD_H, app.paperImg);
   app.paperCtx.putImageData(app.paperImg, 0, 0);
   app.det = detectLevel(app.paperImg, app.vision);
-  buildCleanImage(app.det, app.cleanCanvas);
-  for (const t of ['solid', 'bouncy', 'hazard', 'goal', 'coin']) $('n-' + t).textContent = app.det.counts[t];
+  buildCleanImage(app.det, app.cleanCanvas, usedColours());
+  for (const c of usedColours()) { const el = $('n-' + c); if (el) el.textContent = app.det.counts[c]; }
 }
 
 // ---------------------------------------------------------------- modes
@@ -360,35 +472,35 @@ function setMode(mode) {
   $('btn-restart').hidden = !play;
   $('mode-pill').textContent = play ? 'PLAYING' : 'BUILD';
   $('mode-pill').classList.toggle('running', play);
-  $('hint-inline').textContent = play
-    ? '← → to run · Space or ↑ to jump · R to restart'
-    : 'Draw, then press Play. Click the paper to move the start flag.';
+  $('hint-inline').textContent = play ? app.gameDef.playHint : app.gameDef.buildHint;
   $('win').hidden = true;
   $('play').classList.toggle('playing', play);
-  touch.reset();
+  input.clear();
   resizeGame();
   app.effects.clear();
   if (play) setFixing(false);
   if (play) {
     app.sfx.ensure();
     scan(true);                       // one last look, then freeze the level
-    app.game = new Game(new Level(app.det, WORLD_W, WORLD_H), app.start, app.maxLives);
-    app.game.events.push({ type: 'spawn', x: app.game.player.x, y: app.game.player.y });
-    if (!app.det.counts.goal) toast('No green goal yet. Draw one to win!', 3000);
+    app.session = app.gameDef.create({
+      det: app.det, start: { ...app.start }, settings: settingsFor(app.gameDef), W: WORLD_W, H: WORLD_H,
+    });
+    const warning = app.gameDef.checkLevel?.(app.det);
+    if (warning) toast(warning, 3000);
     else if (touchOn() && !app.portraitTipShown && innerHeight > innerWidth && innerWidth < 700) {
       app.portraitTipShown = true;
       toast('Tip: turn sideways for a bigger view', 3000);
     }
   } else {
-    app.game = null;
+    app.session = null;
   }
 }
 
 function restart() {
-  if (!app.game) return;
+  if (!app.session) return;
   $('win').hidden = true;
   app.effects.clear();
-  app.game.restart();
+  app.session.restart();
 }
 
 const blurAfter = (fn) => (e) => { e.currentTarget.blur(); fn(); };
@@ -426,17 +538,11 @@ $('match').value = String(app.vision.colourMatch);
 $('match').addEventListener('input', (e) => { app.vision.colourMatch = +e.target.value; saveSettings(); scan(true); });
 $('gap').addEventListener('input', (e) => { app.vision.gapFill = +e.target.value; scan(true); });
 
-$('lives').value = String(app.maxLives);
-$('lives').addEventListener('change', (e) => {
-  app.maxLives = e.target.value === 'Infinity' ? Infinity : +e.target.value;
-  saveSettings();
-  if (app.game) { app.game.maxLives = app.maxLives; restart(); }
-});
-
 // ---------------------------------------------------------------- fix colours
 // Click anything the camera got wrong and say what it should be. The colours
 // under the click become new examples for that type (or "ignore").
-const TYPE_LABEL = { solid: 'Ground', bouncy: 'Bouncy', hazard: 'Danger', goal: 'Goal', coin: 'Coin', ignore: 'Ignore' };
+const fixLabel = (c) => (c === 'ignore' ? 'ignored'
+  : app.gameDef.colours[c] ? `${COLOUR_INFO[c].name.toLowerCase()} (${app.gameDef.colours[c].toLowerCase()})` : COLOUR_INFO[c].name.toLowerCase());
 const MAX_SAMPLES = 150;
 
 function setFixing(on) {
@@ -466,10 +572,10 @@ function openFixMenu(x, y, clientX, clientY) {
     toast('That looks like blank paper. Click right on the marker line.', 3000);
     return;
   }
-  const current = typeAt(app.det, x, y, 12);
+  const current = colourAt(app.det, x, y, 12);
   app.pendingFix = { samples };
   $('fix-menu-title').textContent = current
-    ? `The camera thinks this is ${TYPE_LABEL[current]}. It should be…`
+    ? `The camera sees this as ${fixLabel(current)}. It should be…`
     : 'The camera is ignoring this. It should be…';
   document.querySelectorAll('#fix-menu [data-type]').forEach((b) =>
     b.classList.toggle('current', b.dataset.type === (current || 'ignore')));
@@ -479,7 +585,7 @@ function openFixMenu(x, y, clientX, clientY) {
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
   menu.style.left = `${Math.min(st.width - mw - 8, Math.max(8, clientX - st.left + 12))}px`;
   menu.style.top = `${Math.min(st.height - mh - 8, Math.max(8, clientY - st.top - 20))}px`;
-  menu.querySelector(`[data-type="${current === 'solid' ? 'bouncy' : 'solid'}"]`)?.focus();
+  menu.querySelector(`[data-type="${current === 'black' ? 'blue' : 'black'}"]`)?.focus();
 }
 function applyFix(type) {
   const fix = app.pendingFix;
@@ -492,9 +598,9 @@ function applyFix(type) {
   saveSettings();
   scan(true);
   updateFixPanel();
-  toast(type === 'ignore' ? 'Got it: that colour will be ignored.' : `Got it: that colour is now ${TYPE_LABEL[type]}.`);
+  toast(type === 'ignore' ? 'Got it: that colour will be ignored.' : `Got it: that colour is now ${fixLabel(type)}.`);
 }
-document.querySelectorAll('#fix-menu [data-type]').forEach((b) =>
+document.querySelectorAll('#fix-menu > [data-type]').forEach((b) =>
   b.addEventListener('click', () => applyFix(b.dataset.type)));
 $('btn-fix').addEventListener('click', blurAfter(() => setFixing(!app.fixing)));
 $('btn-fix-done').addEventListener('click', () => setFixing(false));
@@ -518,7 +624,6 @@ $('btn-fix-reset').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------- class levels
-const DEFAULT_START = { x: 70, y: 90 };
 
 function fmtDate(t) {
   try { return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; }
@@ -527,7 +632,7 @@ function fmtDate(t) {
 async function renderLibrary() {
   const grid = $('lib-grid');
   let levels = [];
-  try { levels = await Library.listLevels(); } catch (err) {
+  try { levels = await Library.listLevels(app.gameDef.id); } catch (err) {
     grid.innerHTML = '';
     $('lib-empty').hidden = false;
     $('lib-empty').innerHTML = `<p><b>This browser won't let the game save levels.</b></p><p>${err.message || ''} Private/incognito windows often block saving.</p>`;
@@ -568,14 +673,15 @@ const escapeHtml = (t) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&l
 async function playLevel(id) {
   const level = await Library.getLevel(id);
   if (!level) return;
-  if (!app.levelIds.includes(id)) app.levelIds = (await Library.listLevels()).map((l) => l.id);
+  if (level.game && level.game !== app.gameDef.id && GAMES.some((g) => g.id === level.game)) chooseGame(level.game);
+  if (!app.levelIds.includes(id)) app.levelIds = (await Library.listLevels(app.gameDef.id)).map((l) => l.id);
   const img = await Library.loadImage(level.image);
   stopSource();
   app.source = new ImageSource(img);
   setCorners([{ x: 0, y: 0 }, { x: img.width, y: 0 }, { x: img.width, y: img.height }, { x: 0, y: img.height }]);
   const paper = [{ x: 0, y: 0 }, { x: WORLD_W, y: 0 }, { x: WORLD_W, y: WORLD_H }, { x: 0, y: WORLD_H }];
   app.H = computeHomography(paper, app.corners);
-  app.start = level.start || { ...DEFAULT_START };
+  app.start = level.start || { ...app.gameDef.defaultStart };
   app.currentLevelId = id;
   app.currentLevelName = level.name;
   updateLevelNav();
@@ -583,25 +689,10 @@ async function playLevel(id) {
   setMode('build');
   scan(true);
   if (!level.start) {
-    app.start = guessStart(app.det);
+    app.start = app.gameDef.guessStart(app.det);
     Library.updateStart(id, app.start).catch(() => {});
   }
   toast(level.name, 1800);
-}
-
-// No start flag yet: stand on the left-most piece of ground.
-function guessStart(det) {
-  let best = null;
-  for (const o of det.outlines) {
-    if (o.type !== 'solid') continue;
-    const minX = Math.min(...o.points.map((p) => p.x));
-    if (!best || minX < best.minX) best = { o, minX };
-  }
-  if (!best) return { ...DEFAULT_START };
-  const x = best.minX + 22;
-  const tops = best.o.points.filter((p) => Math.abs(p.x - x) < 14).map((p) => p.y);
-  const y = tops.length ? Math.min(...tops) - 2 : Math.min(...best.o.points.map((p) => p.y)) - 2;
-  return { x: Math.max(12, x), y: Math.max(50, y) };
 }
 
 function stepLevel(dir) {
@@ -638,7 +729,7 @@ for (const id of ['scan-input', 'lib-file-input']) {
 $('btn-save').addEventListener('click', blurAfter(async () => {
   if (!app.source) return;
   if (app.mode === 'build') scan(true);
-  const count = (await Library.listLevels().catch(() => [])).length;
+  const count = (await Library.listLevels(app.gameDef.id).catch(() => [])).length;
   $('save-name').value = app.currentLevelId ? (app.currentLevelName || '') : `Level ${count + 1}`;
   $('save-as-new').hidden = !app.currentLevelId;
   $('save-ok').textContent = app.currentLevelId ? 'Update' : 'Save';
@@ -652,10 +743,10 @@ $('save-dialog').addEventListener('close', async () => {
   try {
     const level = await Library.saveLevel({
       id: how === 'save' ? app.currentLevelId : null,
-      name, canvas: app.paperCanvas, start: app.start,
+      name, canvas: app.paperCanvas, start: app.start, game: app.gameDef.id,
     });
     if (app.currentLevelId) { app.currentLevelId = level.id; app.currentLevelName = level.name; }
-    app.levelIds = (await Library.listLevels()).map((l) => l.id);
+    app.levelIds = (await Library.listLevels(app.gameDef.id)).map((l) => l.id);
     if (app.currentLevelId) updateLevelNav();
     toast(`Saved "${name}" to Class levels`);
   } catch (err) {
@@ -740,7 +831,7 @@ $('scan-input').addEventListener('change', async (e) => {
   $('import-ok').disabled = true;
   $('import-status').textContent = 'Reading files…';
   $('import-dialog').showModal();
-  const startCount = (await Library.listLevels().catch(() => [])).length;
+  const startCount = (await Library.listLevels(app.gameDef.id).catch(() => [])).length;
   try {
     await readFiles(files, async (canvas, label) => {
       const res = flattenPage(canvas);
@@ -770,7 +861,7 @@ $('import-ok').addEventListener('click', async () => {
   let n = 0;
   for (const it of items) {
     $('import-status').textContent = `Saving ${++n} of ${items.length}…`;
-    await Library.saveLevel({ name: it.name.trim() || 'Untitled level', canvas: it.world, start: null });
+    await Library.saveLevel({ name: it.name.trim() || 'Untitled level', canvas: it.world, start: null, game: app.gameDef.id });
   }
   importItems = [];
   $('import-dialog').close();
@@ -779,11 +870,6 @@ $('import-ok').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------- input
-const keys = new Set();
-let jumpQueued = false;
-const JUMP_KEYS = ['Space', 'ArrowUp', 'KeyW'];
-const GAME_KEYS = [...JUMP_KEYS, 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'KeyA', 'KeyD'];
-
 document.addEventListener('keydown', (e) => {
   if (!isActive('play')) return;
   // Typing in a box (level names, etc.) must never control the game.
@@ -791,8 +877,7 @@ document.addEventListener('keydown', (e) => {
   if (t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type !== 'range' && t.type !== 'checkbox')) return;
   if (document.querySelector('dialog[open]')) return;
   if (GAME_KEYS.includes(e.code)) e.preventDefault();
-  if (!keys.has(e.code) && JUMP_KEYS.includes(e.code)) jumpQueued = true;
-  keys.add(e.code);
+  input.keyDown(e.code);
   if (e.repeat) return;
   if (e.code === 'Enter') { e.preventDefault(); setMode(app.mode === 'play' ? 'build' : 'play'); }
   else if (e.code === 'Escape' && !$('fix-menu').hidden) hideFixMenu();
@@ -805,44 +890,13 @@ document.addEventListener('keydown', (e) => {
   else if (e.code === 'PageDown' && app.currentLevelId) { e.preventDefault(); stepLevel(1); }
   else if (e.code === 'PageUp' && app.currentLevelId) { e.preventDefault(); stepLevel(-1); }
 });
-document.addEventListener('keyup', (e) => keys.delete(e.code));
-window.addEventListener('blur', () => keys.clear());
-
-// Gamepads: left stick / d-pad to move, A (or B) to jump, Start to switch modes.
-let padJumpWas = false, padStartWas = false, padRestartWas = false;
-function readInput() {
-  let left = keys.has('ArrowLeft') || keys.has('KeyA');
-  let right = keys.has('ArrowRight') || keys.has('KeyD');
-  let jumpHeld = JUMP_KEYS.some((k) => keys.has(k));
-  let jumpPressed = jumpQueued;
-  jumpQueued = false;
-  for (const pad of navigator.getGamepads ? navigator.getGamepads() : []) {
-    if (!pad) continue;
-    const ax = pad.axes[0] || 0;
-    const btn = (i) => pad.buttons[i]?.pressed;
-    if (ax < -0.35 || btn(14)) left = true;
-    if (ax > 0.35 || btn(15)) right = true;
-    const j = btn(0) || btn(1) || btn(12);
-    if (j) jumpHeld = true;
-    if (j && !padJumpWas) jumpPressed = true;
-    padJumpWas = j;
-    const st = btn(9);
-    if (st && !padStartWas) setMode(app.mode === 'play' ? 'build' : 'play');
-    padStartWas = st;
-    const rs = btn(3) || btn(8);
-    if (rs && !padRestartWas) restart();
-    padRestartWas = rs;
-  }
-  const t = touch.read();
-  if (t.left) left = true;
-  if (t.right) right = true;
-  if (t.jumpHeld) jumpHeld = true;
-  if (t.jumpPressed) jumpPressed = true;
-  return { left, right, jumpHeld, jumpPressed };
-}
+document.addEventListener('keyup', (e) => input.keyUp(e.code));
+window.addEventListener('blur', () => input.clear());
 
 // ---------------------------------------------------------------- touch controls
 const touch = new TouchControls({ dpad: $('dpad'), thumb: $('dpad-thumb'), a: $('tb-a'), b: $('tb-b') });
+const input = new Input(touch);
+const padState = {};
 const coarse = window.matchMedia('(pointer: coarse)');
 
 function touchOn() {
@@ -929,6 +983,7 @@ gameCanvas.addEventListener('pointerdown', (e) => {
     openFixMenu(((e.clientX - r.left) / r.width) * WORLD_W, ((e.clientY - r.top) / r.height) * WORLD_H, e.clientX, e.clientY);
     return;
   }
+  if (!app.gameDef.usesStart) return;
   app.start = {
     x: Math.max(12, Math.min(WORLD_W - 12, ((e.clientX - r.left) / r.width) * WORLD_W)),
     y: Math.max(50, Math.min(WORLD_H - 4, ((e.clientY - r.top) / r.height) * WORLD_H)),
@@ -956,23 +1011,43 @@ function toast(msg, ms = 2200) {
 }
 
 function showEnd(kind) {
-  const g = app.game;
-  if (!g || g.state !== kind) return;
-  const won = kind === 'won';
-  const parts = [];
-  if (won) parts.push(`Time ${g.seconds.toFixed(1)}s`);
-  if (g.coinsTotal) parts.push(`Coins ${g.coinsTaken}/${g.coinsTotal}`);
-  if (won) {
-    if (Number.isFinite(g.maxLives)) parts.push(g.deaths ? `${g.lives} ${g.lives === 1 ? 'life' : 'lives'} left` : 'No lives lost!');
-    else parts.push(g.deaths ? `${g.deaths} ${g.deaths === 1 ? 'fall' : 'falls'}` : 'First try!');
-  } else {
-    parts.push('Can you find a safer way?');
-  }
-  $('win-title').textContent = won ? 'Level complete! 🎉' : 'Out of lives!';
-  $('btn-again-label').textContent = won ? 'Play again' : 'Try again';
-  document.querySelector('.win-card').classList.toggle('over', !won);
-  $('win-stats').textContent = parts.join(' · ');
+  const ses = app.session;
+  if (!ses || ses.state !== kind) return;
+  const card = ses.endCard();
+  $('win-title').textContent = card.title;
+  $('btn-again-label').textContent = card.retry;
+  document.querySelector('.win-card').classList.toggle('over', !card.won);
+  $('win-stats').textContent = card.stats;
   $('win').hidden = false;
+}
+
+// ---------------------------------------------------------------- drawing
+function drawScene(now) {
+  const ctx = gameCtx;
+  ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  // 1. The paper: the camera image, or a clean redraw of what was detected
+  if (app.view === 'camera') {
+    ctx.drawImage(app.paperCanvas, 0, 0, WORLD_W, WORLD_H);
+  } else {
+    ctx.fillStyle = '#fbfaf6';
+    ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+    ctx.drawImage(app.cleanCanvas, 0, 0, WORLD_W, WORLD_H);
+  }
+  // Fix colours: tint everything the camera recognised, so mistakes stand out.
+  if (app.fixing && app.view === 'camera') {
+    ctx.globalAlpha = 0.6;
+    ctx.drawImage(app.cleanCanvas, 0, 0, WORLD_W, WORLD_H);
+    ctx.globalAlpha = 1;
+  }
+  // 2. The game
+  if (app.mode === 'build' && app.det) {
+    drawOutlines(ctx, app.det, usedColours());
+    app.gameDef.drawBuild(ctx, { det: app.det, start: app.start, now });
+  }
+  if (app.mode === 'play' && app.session) app.session.draw(ctx, { det: app.det, now });
+  app.effects.draw(ctx);
+  if (app.mode === 'play' && app.session) drawHud(ctx, app.session.hud());
 }
 
 // ---------------------------------------------------------------- main loop
@@ -984,28 +1059,25 @@ function frame(now) {
   if (isActive('setup')) drawSetup();
   if (isActive('play') && app.source) {
     if (app.mode === 'build') scan();
+    const pad = padButtonsPressed(padState);
+    if (pad.start) setMode(app.mode === 'play' ? 'build' : 'play');
+    if (pad.restart) restart();
     acc += dt;
     while (acc >= STEP_MS) {
       acc -= STEP_MS;
-      const input = readInput();
-      if (app.game) {
-        const before = app.game.state;
-        app.game.update(input);
-        for (const e of app.game.events) app.effects.handle(e, app.sfx);
-        app.game.events.length = 0;
-        const after = app.game.state;
+      const inp = input.read();
+      const ses = app.session;
+      if (ses) {
+        const before = ses.state;
+        ses.update(inp, app.effects, app.sfx);
+        const after = ses.state;
         if (before !== after && (after === 'won' || after === 'over')) setTimeout(() => showEnd(after), after === 'won' ? 900 : 1100);
-        // Jump on the end screen = play again
-        if (!$('win').hidden && input.jumpPressed) restart();
+        // A (or up) on the end screen = play again
+        if (!$('win').hidden && (inp.aPressed || inp.upPressed)) restart();
       }
       app.effects.update();
     }
-    drawScene(gameCtx, canvasScale, {
-      W: WORLD_W, H: WORLD_H,
-      paper: app.paperCanvas, clean: app.cleanCanvas,
-      view: app.view, mode: app.mode, det: app.det, fixing: app.fixing,
-      game: app.game, start: app.start, effects: app.effects, now,
-    });
+    drawScene(now);
   }
   requestAnimationFrame(frame);
 }

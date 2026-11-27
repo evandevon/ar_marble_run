@@ -41,14 +41,18 @@ export class Level {
     this.w = det.w;
     this.h = det.h;
     this.s = det.scale;
-    const { solid, bouncy, hazard, goal } = det.masks;
+    // Black = ground, blue = trampolines, red = danger, green = goal, orange dots = coins.
+    const { black: solid, blue: bouncy, red: hazard, green: goal } = det.masks;
     // Only black ink is solid from every side. Trampolines are one-way: you can
     // pass up (or sideways) through them, and only land on them from above.
     this.block = solid;
     this.bouncy = bouncy;
     this.hazard = hazard.slice();
     this.goal = goal;
-    this.coins = det.coins.map((c) => ({ ...c, taken: false, spin: Math.random() * 6 }));
+    this.coins = det.blobs.orange.map((b) => ({
+      x: b.x, y: b.y, r: Math.max(9, Math.min(18, Math.sqrt(b.area / Math.PI))),
+      taken: false, spin: Math.random() * 6,
+    }));
     // Coins are never dangerous, even if their edges looked red to the camera.
     for (const c of this.coins) {
       const r = (c.r + 8) / this.s;

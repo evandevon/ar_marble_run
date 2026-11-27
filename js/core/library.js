@@ -1,6 +1,8 @@
 // Class level library, stored in the browser on this computer (IndexedDB).
-// Each level is the flattened drawing (a JPEG of the paper) plus its start flag,
-// so it replays with the real drawing visible and the current colour settings.
+// Each level is the flattened drawing (a JPEG of the paper), its start point and
+// which game it was drawn for, so it replays with the real drawing visible and
+// the current colour settings. Levels saved before there were several games
+// belong to the platformer.
 
 const DB_NAME = 'paper-platformer';
 const STORE = 'levels';
@@ -44,11 +46,12 @@ export function canvasToDataURL(canvas, w, quality = 0.85) {
 }
 
 // Save a flattened paper canvas (world size) as a new level, or update one.
-export async function saveLevel({ id, name, canvas, start }) {
+export async function saveLevel({ id, name, canvas, start, game }) {
   const existing = id ? await getLevel(id) : null;
   const level = {
     id: existing ? existing.id : newId(),
     name: name || 'Untitled level',
+    game: game || (existing && existing.game) || 'platformer',
     created: existing ? existing.created : Date.now(),
     updated: Date.now(),
     start: start ? { x: Math.round(start.x), y: Math.round(start.y) } : null,
@@ -61,9 +64,12 @@ export async function saveLevel({ id, name, canvas, start }) {
 
 export const getLevel = (id) => tx('readonly', (s) => reqP(s.get(id)));
 
-export async function listLevels() {
+// All levels, or only those for one game.
+export async function listLevels(game) {
   const all = await tx('readonly', (s) => reqP(s.getAll()));
-  return all.sort((a, b) => a.created - b.created);
+  return all
+    .filter((l) => !game || (l.game || 'platformer') === game)
+    .sort((a, b) => a.created - b.created);
 }
 
 export async function renameLevel(id, name) {
@@ -105,6 +111,7 @@ export async function importLibrary(file) {
       s.put({
         id: typeof l.id === 'string' ? l.id : newId(),
         name: String(l.name || 'Untitled level').slice(0, 80),
+        game: typeof l.game === 'string' ? l.game : 'platformer',
         created: Number(l.created) || Date.now(),
         updated: Date.now(),
         start: l.start && Number.isFinite(l.start.x) ? { x: l.start.x, y: l.start.y } : null,

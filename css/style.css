@@ -121,11 +121,11 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 8p
 .legend li { display: flex; align-items: center; gap: 7px; color: var(--muted); }
 .legend b { color: var(--text); }
 .chip { width: 16px; height: 16px; border-radius: 4px; display: inline-block; flex-shrink: 0; }
-.chip.solid { background: #23262e; outline: 2px solid #19c3ff; }
-.chip.bouncy { background: #2a64e0; }
-.chip.hazard { background: #d8322a; }
-.chip.goal { background: #22a85a; }
-.chip.coin { background: #f39c12; border-radius: 50%; }
+.chip.black { background: #23262e; outline: 2px solid #19c3ff; }
+.chip.blue { background: #2a64e0; }
+.chip.red { background: #d8322a; }
+.chip.green { background: #22a85a; }
+.chip.orange { background: #f39c12; border-radius: 50%; }
 .legend.mini { margin: 0; gap: 10px; }
 .legend.mini li { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
 .legend.mini .chip { width: 12px; height: 12px; }
@@ -274,3 +274,17 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 8p
   .win-card { padding: 20px 18px; }
   .win-card h2 { font-size: 1.5rem; }
 }
+
+/* ---------- game picker ---------- */
+.pick-title { font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.game-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.game-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px; text-align: center;
+  background: var(--panel); border: 2px solid var(--line); border-radius: var(--radius); position: relative; }
+.game-card .g-icon { font-size: 1.9rem; line-height: 1; }
+.game-card .g-name { font-weight: 700; }
+.game-card .g-soon { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.game-card[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.game-card:hover:not(:disabled) { border-color: var(--accent); }
+.game-tagline { color: var(--muted); margin: -6px 0 14px; min-height: 1.3em; }
+.game-settings { display: flex; flex-direction: column; gap: 12px; }
+.game-settings:empty { display: none; }

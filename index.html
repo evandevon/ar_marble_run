@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Paper Platformer</title>
+  <title>Paper Arcade</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="css/style.css">
@@ -17,22 +17,20 @@
   <!-- ============ START ============ -->
   <section id="start" class="screen active" aria-labelledby="title">
     <div class="start-inner">
-      <h1 id="title"><span class="logo" aria-hidden="true"></span> Paper Platformer</h1>
+      <h1 id="title"><span class="logo" aria-hidden="true"></span> Paper Arcade</h1>
       <p class="lede">Draw a level with markers. The camera turns it into a game you can play.</p>
 
-      <ul class="legend" aria-label="Marker colour key">
-        <li><span class="chip solid"></span><b>Black</b> ground</li>
-        <li><span class="chip bouncy"></span><b>Blue</b> bouncy</li>
-        <li><span class="chip hazard"></span><b>Red</b> danger</li>
-        <li><span class="chip goal"></span><b>Green</b> goal</li>
-        <li><span class="chip coin"></span><b>Orange / yellow</b> coins</li>
-      </ul>
+      <h2 class="pick-title">Choose a game</h2>
+      <div class="game-picker" id="game-picker" role="radiogroup" aria-label="Choose a game"></div>
+      <p class="game-tagline" id="game-tagline"></p>
+
+      <ul class="legend" id="legend" aria-label="Marker colour key"></ul>
 
       <div class="mode-cards">
         <button class="mode-card" id="btn-screen">
           <span class="mode-icon" aria-hidden="true">🖥️</span>
           <span class="mode-name">Screen mode</span>
-          <span class="mode-desc">Play over the camera view on the front screen.</span>
+          <span class="mode-desc">Draw and play live, with the camera on the front screen.</span>
         </button>
         <button class="mode-card" id="btn-library">
           <span class="mode-icon" aria-hidden="true">📚</span>
@@ -42,7 +40,7 @@
         <button class="mode-card" disabled aria-disabled="true">
           <span class="mode-icon" aria-hidden="true">📽️</span>
           <span class="mode-name">Projector mode</span>
-          <span class="mode-desc">Project the character onto the paper. <em>Coming later.</em></span>
+          <span class="mode-desc">Project the game onto the paper or whiteboard. <em>Coming later.</em></span>
         </button>
       </div>
 
@@ -155,11 +153,7 @@
 
       <div class="fix-menu" id="fix-menu" role="menu" hidden>
         <p class="fix-menu-title" id="fix-menu-title">This should be…</p>
-        <button role="menuitem" data-type="solid"><span class="chip solid"></span>Ground</button>
-        <button role="menuitem" data-type="bouncy"><span class="chip bouncy"></span>Bouncy</button>
-        <button role="menuitem" data-type="hazard"><span class="chip hazard"></span>Danger</button>
-        <button role="menuitem" data-type="goal"><span class="chip goal"></span>Goal</button>
-        <button role="menuitem" data-type="coin"><span class="chip coin"></span>Coin</button>
+        <div id="fix-items"></div>
         <button role="menuitem" data-type="ignore"><span class="chip ignore"></span>Ignore (not part of the game)</button>
         <button class="fix-cancel" data-type="cancel">Cancel</button>
       </div>
@@ -191,13 +185,7 @@
       <button id="btn-menu" class="secondary menu-btn" aria-expanded="false" aria-controls="tools">☰ Menu</button>
 
       <div class="tools" id="tools">
-      <ul class="legend mini" id="legend-mini" aria-label="Detected">
-        <li title="Ground"><span class="chip solid"></span><span id="n-solid">0</span></li>
-        <li title="Bouncy"><span class="chip bouncy"></span><span id="n-bouncy">0</span></li>
-        <li title="Danger"><span class="chip hazard"></span><span id="n-hazard">0</span></li>
-        <li title="Goal"><span class="chip goal"></span><span id="n-goal">0</span></li>
-        <li title="Coins"><span class="chip coin"></span><span id="n-coin">0</span></li>
-      </ul>
+      <ul class="legend mini" id="legend-mini" aria-label="What the camera sees"></ul>
 
       <button id="btn-save" class="secondary" title="Save this level to Class levels">💾 Save</button>
       <button id="btn-levels" class="secondary" title="Class levels">📚<span class="lbl"> Class levels</span></button>
@@ -221,13 +209,7 @@
               <option value="off">Off</option>
             </select>
           </label>
-          <label class="slider">Lives
-            <select id="lives">
-              <option value="3" selected>3</option>
-              <option value="5">5</option>
-              <option value="Infinity">Unlimited</option>
-            </select>
-          </label>
+          <div id="game-settings" class="game-settings"></div>
         </div>
       </details>
       <button id="btn-view" class="secondary" title="C">View: Camera</button>
@@ -265,6 +247,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

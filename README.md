@@ -1,14 +1,25 @@
-# Paper Platformer
+# Paper Arcade
 
-Draw a level with whiteboard markers on paper (or a mini whiteboard). A webcam looking down turns the drawing into a platform game, played by a stick figure on the front screen.
+Draw a level with markers on paper (or a mini whiteboard). A webcam looking down turns the drawing into a game, played on the front screen, a tablet or a phone.
 
-**Play it:** https://evandevon.github.io/ar_marble_run/
+**Play it:** https://evandevon.github.io/ar_marble_run/ (add `?game=platformer` to a link to open a particular game)
+
+## Games
+
+| Game | Status |
+|---|---|
+| 🏃 **Platformer**: run and jump a stick figure across the level you drew | Ready |
+| 🏎️ **Racer**: draw a track (and your own car on the level sheet) and race it top-down | Planned |
+| 🪀 **Pinball**: draw bumpers and ramps; A and B are the flippers | Planned |
+| 👻 **Maze chase**: draw a maze, collect the dots and dodge the chasers | Planned |
+
+The camera only sees marker colours (black, blue, red, green, orange/yellow). Each game decides what the colours mean, and the start screen shows the key for the chosen game.
 
 ## Printable level sheet
 
 Print **[template.html](template.html)** (landscape, A4 or A3, black and white is fine). It has a frame the exact shape of the game, a name line, the colour key, and a true-size picture of the character and its jump height. The four black corner squares let the game crop scans, photos and the webcam view automatically.
 
-## Marker colours
+## Platformer: marker colours
 
 | Marker | Becomes |
 |---|---|
@@ -83,21 +94,30 @@ Fixes are colour examples, so one fix covers every mark in that marker, and any 
 
 ## How it works
 
-| File | Job |
+The code is split into a shared core and one folder per game:
+
+| Folder / file | Job |
 |---|---|
-| `js/camera.js` | Webcam, still photo and demo-level sources |
-| `js/homography.js` | Flattens the angled camera view into a rectangle |
-| `js/vision.js` | Sorts every pixel into a marker colour (adjusting for uneven light), cleans edges, joins gaps |
-| `js/platformer.js` | Character physics against the ink, coins, danger and goal |
-| `js/stickman.js` | The animated stick figure |
-| `js/touch.js` | On-screen D-pad and A/B buttons |
-| `js/effects.js` | Particles and synthesised sound effects |
-| `js/render.js` | Draws everything |
-| `js/library.js` | Class levels saved in the browser (IndexedDB), export and import |
-| `js/importer.js` | Reads PDFs (pdf.js) and photos, crops and straightens each page |
-| `js/markers.js` | Finds the level sheet's corner squares |
-| `js/main.js` | Screens, setup, controls and the game loop |
-| `js/marble/` | The earlier marble-run prototype, parked for a possible physics mode |
+| `js/app.js` | The app shell: start screen, camera setup, scanning, class levels, Fix colours, controls, game loop |
+| `js/core/camera.js` | Webcam and still-photo sources, rotate/flip |
+| `js/core/homography.js` | Flattens the angled camera view into a rectangle |
+| `js/core/vision.js` | Sorts every pixel into a marker colour (adjusting for uneven light), cleans edges, joins gaps |
+| `js/core/colours.js` | The marker colours, clean view and build-mode outlines |
+| `js/core/markers.js` | Finds the level sheet's corner squares |
+| `js/core/library.js` | Class levels saved in the browser (IndexedDB), export and import |
+| `js/core/importer.js` | Reads PDFs (pdf.js) and photos, crops and straightens each page |
+| `js/core/input.js`, `touch.js` | Keyboard, game controllers and the on-screen D-pad and A/B buttons, merged into one input |
+| `js/core/effects.js`, `hud.js` | Particles, synthesised sounds, and the status panel |
+| `js/games/index.js` | The list of games and the interface every game module follows |
+| `js/games/platformer/` | The platformer: physics, stick figure, drawing, effects, demo level |
+| `js/parked/` | The earlier marble-run physics, kept for mini golf / pinball |
+
+### Adding a game
+
+1. Make a folder in `js/games/` with an `index.js` that exports a game module. The comment at the top of `js/games/index.js` lists what a module provides: name and icon, what each colour means, settings, a demo drawing, build-mode guides, and a `create()` that returns the playing session.
+2. Add it to `GAMES` in `js/games/index.js` (and remove it from `COMING_SOON`).
+
+Everything else (camera, corners, Fix colours, class levels, scans, touch controls, gamepads, fullscreen) works for the new game automatically. Saved levels remember which game they were drawn for.
 
 Everything runs in the browser. There is no server and nothing leaves the computer. PDF reading uses [pdf.js](https://mozilla.github.io/pdf.js/) (Apache 2.0), included in `lib/pdfjs/`.
 

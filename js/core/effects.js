@@ -1,6 +1,5 @@
-// Particles, floating text and little synthesised sound effects.
-import { PLAYER } from './platformer.js';
-const PLAYER_BOUNCE_MAX = PLAYER.bounceMax;
+// Particles, floating text and little synthesised sound effects, shared by all
+// games. Each game decides which effects and sounds its events make.
 
 export class Effects {
   constructor() {
@@ -24,69 +23,6 @@ export class Effects {
 
   text(x, y, str, colour = '#ffb703') { this.texts.push({ x, y, str, colour, life: 50, max: 50 }); }
   ring(x, y, colour, maxR = 40) { this.rings.push({ x, y, colour, r: 4, maxR, life: 22, max: 22 }); }
-
-  // Turn game events into effects.
-  handle(e, sfx) {
-    switch (e.type) {
-      case 'jump':
-        this.burst(e.x, e.y, { count: 8, speed: 2, colour: '#c9c2b4', angle: 0, spread: Math.PI, gravity: -0.02, life: 22, size: 4 });
-        sfx.play('jump');
-        break;
-      case 'land':
-        if (e.impact > 5) {
-          const n = Math.min(16, Math.round(e.impact * 1.2));
-          this.burst(e.x - 4, e.y, { count: n / 2, speed: e.impact / 4, colour: '#c9c2b4', angle: Math.PI, spread: 0.7, gravity: -0.01, life: 24, size: 4 });
-          this.burst(e.x + 4, e.y, { count: n / 2, speed: e.impact / 4, colour: '#c9c2b4', angle: 0, spread: 0.7, gravity: -0.01, life: 24, size: 4 });
-          sfx.play('land');
-        }
-        break;
-      case 'dust':
-        this.burst(e.x, e.y - 2, { count: 1, speed: 0.8, colour: '#d6d0c4', angle: -Math.PI / 2, spread: 1.5, gravity: -0.02, life: 18, size: 3.5 });
-        break;
-      case 'bounce':
-        this.ring(e.x, e.y, '#3a7bff', 46);
-        this.burst(e.x, e.y, { count: 14, speed: 4, colour: ['#3a7bff', '#9cc0ff', '#fff'], angle: -Math.PI / 2, spread: 2.2, life: 28 });
-        sfx.play('bounce');
-        break;
-      case 'boost': {
-        const n = Math.round(6 + e.power * 18);
-        this.ring(e.x, e.y, '#9cc0ff', 20 + e.power * 30);
-        this.burst(e.x, e.y, { count: n, speed: 2 + e.power * 4, colour: ['#3a7bff', '#9cc0ff', '#ffffff'], angle: Math.PI / 2, spread: 1.6, life: 26, shape: 'star', size: 3.5 });
-        if (e.ratio > PLAYER_BOUNCE_MAX + 0.01) this.text(e.x, e.y - 50, 'HIGHER!', '#3a7bff');
-        else if (e.power > 0.8) this.text(e.x, e.y - 50, 'SUPER!', '#3a7bff');
-        sfx.play('boost', e.ratio ? e.ratio / PLAYER_BOUNCE_MAX : e.power);
-        break;
-      }
-      case 'bonk':
-        this.burst(e.x, e.y, { count: 5, speed: 2, colour: '#fff', angle: Math.PI / 2, spread: 2, life: 15 });
-        break;
-      case 'coin':
-        this.ring(e.x, e.y, '#ffb703', 34);
-        this.burst(e.x, e.y, { count: 14, speed: 3.5, colour: ['#ffb703', '#ffe08a', '#fff'], gravity: 0.05, life: 30, shape: 'star', size: 4 });
-        this.text(e.x, e.y - 18, '+1');
-        sfx.play('coin');
-        break;
-      case 'die':
-        this.burst(e.x, e.y, { count: 26, speed: 5, colour: e.fell ? ['#e0157f', '#fff'] : ['#ff3b30', '#ff9f0a', '#e0157f'], life: 40, size: 4 });
-        this.ring(e.x, e.y, '#ff3b30', 60);
-        sfx.play('die');
-        break;
-      case 'spawn':
-        this.ring(e.x, e.y - 20, '#e0157f', 40);
-        this.burst(e.x, e.y - 20, { count: 12, speed: 2.5, colour: ['#e0157f', '#fff'], gravity: 0, life: 24 });
-        break;
-      case 'gameover':
-        sfx.play('gameover');
-        break;
-      case 'win':
-        for (let i = 0; i < 4; i++) {
-          this.burst(e.x, e.y, { count: 30, speed: 7 + i, colour: ['#2ecc71', '#ffb703', '#3a7bff', '#e0157f', '#fff'], gravity: 0.12, life: 90, shape: 'confetti', size: 5, spread: 1.6 });
-        }
-        this.ring(e.x, e.y, '#2ecc71', 90);
-        sfx.play('win');
-        break;
-    }
-  }
 
   update() {
     for (const p of this.parts) { p.x += p.vx; p.y += p.vy; p.vy += p.gravity; p.vx *= 0.97; p.rot += p.vr; p.life--; }

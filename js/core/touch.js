@@ -1,9 +1,8 @@
 // On-screen controls: a D-pad on the left, A and B buttons on the right.
 // Each control tracks its own finger, so moving and jumping at the same time works.
 //
-//   D-pad  left / right to run, up to jump (slide your thumb between directions)
-//   A      jump
-//   B      jump for now (spare for future actions and other game types)
+//   D-pad  four directions; slide your thumb between them (diagonals work)
+//   A, B   two action buttons. Each game decides what they do.
 
 export class TouchControls {
   constructor({ dpad, thumb, a, b }) {
@@ -12,9 +11,10 @@ export class TouchControls {
     this.left = false;
     this.right = false;
     this.up = false;
+    this.down = false;
     this.a = false;
     this.b = false;
-    this.jumpQueued = false;
+    this.pressed = { up: false, down: false, a: false, b: false };   // since the last read
     this.padPointer = null;
     this.arrows = {
       up: dpad.querySelector('.dp.up'), down: dpad.querySelector('.dp.down'),
@@ -43,7 +43,7 @@ export class TouchControls {
         if (id !== null) return;
         id = e.pointerId;
         el.setPointerCapture(e.pointerId);
-        if (!this[key]) this.jumpQueued = true;
+        if (!this[key]) this.pressed[key] = true;
         this[key] = true;
         el.classList.add('on');
         try { navigator.vibrate?.(8); } catch { /* not supported */ }
@@ -72,42 +72,42 @@ export class TouchControls {
     if (len > 1) { dx /= len; dy /= len; }
     this.left = dx < -0.3;
     this.right = dx > 0.3;
-    const up = dy < -0.5;
-    if (up && !this.up) this.jumpQueued = true;
+    const up = dy < -0.5, down = dy > 0.5;
+    if (up && !this.up) this.pressed.up = true;
+    if (down && !this.down) this.pressed.down = true;
     this.up = up;
+    this.down = down;
     this.thumb.style.transform = `translate(calc(-50% + ${dx * rad * 0.55}px), calc(-50% + ${dy * rad * 0.55}px))`;
-    this.showArrows(dy > 0.5);
+    this.showArrows();
   }
 
   padRelease() {
     this.padPointer = null;
-    this.left = this.right = this.up = false;
+    this.left = this.right = this.up = this.down = false;
     this.thumb.style.transform = '';
-    this.showArrows(false);
+    this.showArrows();
   }
 
-  showArrows(down) {
+  showArrows() {
     this.arrows.left.classList.toggle('on', this.left);
     this.arrows.right.classList.toggle('on', this.right);
     this.arrows.up.classList.toggle('on', this.up);
-    this.arrows.down.classList.toggle('on', down);
+    this.arrows.down.classList.toggle('on', this.down);
   }
 
-  // Merge into the game's input for this step.
+  // Current state, plus which controls were pressed since the last read.
   read() {
-    const pressed = this.jumpQueued;
-    this.jumpQueued = false;
+    const p = this.pressed;
+    this.pressed = { up: false, down: false, a: false, b: false };
     return {
-      left: this.left,
-      right: this.right,
-      jumpHeld: this.up || this.a || this.b,
-      jumpPressed: pressed,
+      left: this.left, right: this.right, up: this.up, down: this.down, a: this.a, b: this.b,
+      upPressed: p.up, downPressed: p.down, aPressed: p.a, bPressed: p.b,
     };
   }
 
   reset() {
     this.padRelease();
     this.a = this.b = false;
-    this.jumpQueued = false;
+    this.pressed = { up: false, down: false, a: false, b: false };
   }
 }
