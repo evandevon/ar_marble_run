@@ -77,7 +77,8 @@ export class WebcamSource extends OrientedSource {
     const video = {
       width: { ideal: 1920 },
       height: { ideal: 1080 },
-      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      // Phones and tablets: use the back camera unless a camera is chosen.
+      ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }),
     };
     this.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
     this.video.srcObject = this.stream;

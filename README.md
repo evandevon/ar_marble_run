@@ -25,6 +25,8 @@ Print **[template.html](template.html)** (landscape, A4 or A3, black and white i
 3. **← →** (or A/D) to run, **Space / ↑ / W** to jump. Hold jump for a higher jump. **R** restarts.
 4. Reach the green goal. You have 3 lives (change this under **Tune**). Press **Build** to change the drawing and try again.
 
+On phones, tablets and touch screens, on-screen controls appear when you play: a D-pad on the left (left/right to run, up to jump) and **A** / **B** on the right (both jump for now). They sit beside the level in landscape and below it in portrait. Turn them on or off under **Tune → Touch controls**. On phones, the camera starts with the back camera. Add the page to your home screen to play full screen.
+
 Game controllers work too: stick or d-pad to move, A to jump, Y to restart, Start to switch between Build and Play.
 
 No camera? Try the built-in demo level, or a photo of a drawing.
@@ -88,6 +90,7 @@ Fixes are colour examples, so one fix covers every mark in that marker, and any 
 | `js/vision.js` | Sorts every pixel into a marker colour (adjusting for uneven light), cleans edges, joins gaps |
 | `js/platformer.js` | Character physics against the ink, coins, danger and goal |
 | `js/stickman.js` | The animated stick figure |
+| `js/touch.js` | On-screen D-pad and A/B buttons |
 | `js/effects.js` | Particles and synthesised sound effects |
 | `js/render.js` | Draws everything |
 | `js/library.js` | Class levels saved in the browser (IndexedDB), export and import |

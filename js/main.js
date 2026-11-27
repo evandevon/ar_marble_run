@@ -7,6 +7,7 @@ import { drawScene, buildCleanImage } from './render.js';
 import * as Library from './library.js';
 import { readFiles, flattenPage, flattenPlain, rotateCanvas, shrink } from './importer.js';
 import { findCornerMarks } from './markers.js';
+import { TouchControls } from './touch.js';
 
 // The game world is the flattened paper, in "paper pixels" (A-series ratio).
 const WORLD_W = 1000;
@@ -16,7 +17,7 @@ const STORE_KEY = 'paper-platformer.calibration.v2';
 const SETTINGS_KEY = 'paper-platformer.settings.v1';
 const STEP_MS = 1000 / 60;
 
-const VERSION = '2026-11-26.10';
+const VERSION = '2026-11-27.1';
 const $ = (id) => document.getElementById(id);
 document.getElementById('version').textContent = `Version ${VERSION}`;
 
@@ -29,6 +30,8 @@ const app = {
   vision: { ...DEFAULT_VISION, samples: [] },
   orient: { rotate: 0, flipH: false, flipV: false },
   maxLives: 3,
+  touchMode: 'auto',      // on-screen controls: auto | on | off
+  sawTouch: false,        // a finger has touched the screen this session
   currentLevelId: null,   // set while playing a saved level
   levelIds: [],           // the library order, for previous / next
   fixing: false,          // Fix colours mode
@@ -55,12 +58,14 @@ function loadSettings() {
     if (Array.isArray(st.samples)) app.vision.samples = st.samples;
     if (st.colourMatch) app.vision.colourMatch = st.colourMatch;
     if (st.lives) app.maxLives = st.lives === 'Infinity' ? Infinity : +st.lives;
+    if (['auto', 'on', 'off'].includes(st.touchMode)) app.touchMode = st.touchMode;
   } catch { /* storage unavailable */ }
 }
 function saveSettings() {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
       orient: app.orient, samples: app.vision.samples, colourMatch: app.vision.colourMatch, lives: String(app.maxLives),
+      touchMode: app.touchMode,
     }));
   } catch { /* storage unavailable */ }
 }
@@ -359,6 +364,9 @@ function setMode(mode) {
     ? '← → to run · Space or ↑ to jump · R to restart'
     : 'Draw, then press Play. Click the paper to move the start flag.';
   $('win').hidden = true;
+  $('play').classList.toggle('playing', play);
+  touch.reset();
+  resizeGame();
   app.effects.clear();
   if (play) setFixing(false);
   if (play) {
@@ -367,6 +375,10 @@ function setMode(mode) {
     app.game = new Game(new Level(app.det, WORLD_W, WORLD_H), app.start, app.maxLives);
     app.game.events.push({ type: 'spawn', x: app.game.player.x, y: app.game.player.y });
     if (!app.det.counts.goal) toast('No green goal yet. Draw one to win!', 3000);
+    else if (touchOn() && !app.portraitTipShown && innerHeight > innerWidth && innerWidth < 700) {
+      app.portraitTipShown = true;
+      toast('Tip: turn sideways for a bigger view', 3000);
+    }
   } else {
     app.game = null;
   }
@@ -400,9 +412,10 @@ function toggleView() {
 }
 function toggleSound() {
   app.sfx.muted = !app.sfx.muted;
-  $('btn-sound').textContent = app.sfx.muted ? '🔇' : '🔊';
+  $('sound-icon').textContent = app.sfx.muted ? '🔇' : '🔊';
   $('btn-sound').setAttribute('aria-pressed', String(!app.sfx.muted));
 }
+if (!document.fullscreenEnabled) $('btn-full').hidden = true;
 function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen();
   else document.documentElement.requestFullscreen?.();
@@ -820,8 +833,54 @@ function readInput() {
     if (rs && !padRestartWas) restart();
     padRestartWas = rs;
   }
+  const t = touch.read();
+  if (t.left) left = true;
+  if (t.right) right = true;
+  if (t.jumpHeld) jumpHeld = true;
+  if (t.jumpPressed) jumpPressed = true;
   return { left, right, jumpHeld, jumpPressed };
 }
+
+// ---------------------------------------------------------------- touch controls
+const touch = new TouchControls({ dpad: $('dpad'), thumb: $('dpad-thumb'), a: $('tb-a'), b: $('tb-b') });
+const coarse = window.matchMedia('(pointer: coarse)');
+
+function touchOn() {
+  if (app.touchMode === 'on') return true;
+  if (app.touchMode === 'off') return false;
+  return coarse.matches || app.sawTouch;
+}
+function updateTouch() {
+  const on = touchOn();
+  if ($('play').classList.contains('touch-on') !== on) {
+    $('play').classList.toggle('touch-on', on);
+    touch.reset();
+    if (isActive('play')) resizeGame();
+  }
+}
+// Auto mode: the first touch on the game turns the on-screen controls on.
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'touch' && !app.sawTouch) { app.sawTouch = true; updateTouch(); }
+}, true);
+coarse.addEventListener?.('change', updateTouch);
+$('touch-mode').value = app.touchMode;
+$('touch-mode').addEventListener('change', (e) => { app.touchMode = e.target.value; saveSettings(); updateTouch(); });
+updateTouch();
+
+// ---------------------------------------------------------------- menu (small screens)
+function setMenu(open) {
+  $('toolbar').classList.toggle('open', open);
+  $('btn-menu').setAttribute('aria-expanded', String(open));
+}
+$('btn-menu').addEventListener('click', (e) => { e.stopPropagation(); setMenu(!$('toolbar').classList.contains('open')); });
+// Using a tool closes the menu (except the Tune controls, which you adjust in place).
+$('tools').addEventListener('click', (e) => {
+  if (e.target.closest('.tune')) return;
+  if (e.target.closest('button')) setMenu(false);
+});
+document.addEventListener('pointerdown', (e) => {
+  if ($('toolbar').classList.contains('open') && !e.target.closest('#tools') && !e.target.closest('#btn-menu')) setMenu(false);
+});
 
 // ---------------------------------------------------------------- canvas
 const gameCanvas = $('game-canvas');
@@ -829,9 +888,29 @@ const gameCtx = gameCanvas.getContext('2d');
 let canvasScale = 1;
 
 function resizeGame() {
-  const r = $('stage').getBoundingClientRect();
-  const s = Math.min(r.width / WORLD_W, r.height / WORLD_H);
-  const dpr = window.devicePixelRatio || 1;
+  const stage = $('stage');
+  const r = stage.getBoundingClientRect();
+  let s = Math.min(r.width / WORLD_W, r.height / WORLD_H);
+  let layout = '';
+  if ($('play').classList.contains('touch-on') && app.mode === 'play') {
+    // Size the controls to the screen, then fit the level beside them (landscape)
+    // or above them (portrait), whichever leaves the level bigger.
+    const short = Math.min(window.innerWidth, window.innerHeight);
+    const dpadSize = Math.round(Math.max(120, Math.min(180, short * 0.3)));
+    const btnSize = Math.round(dpadSize * 0.5);
+    stage.style.setProperty('--dpad', `${dpadSize}px`);
+    stage.style.setProperty('--btn', `${btnSize}px`);
+    const side = dpadSize + 28;
+    const sSide = Math.min((r.width - 2 * side) / WORLD_W, r.height / WORLD_H);
+    const sBottom = Math.min(r.width / WORLD_W, (r.height - dpadSize - 32) / WORLD_H);
+    if (sSide >= sBottom) { s = sSide; layout = 'touch-side'; } else { s = sBottom; layout = 'touch-bottom'; }
+    s = Math.max(s, 0.1);
+  }
+  // Portrait: keep the level centred in the space above the controls.
+  stage.style.paddingBottom = layout === 'touch-bottom' ? `${parseInt(stage.style.getPropertyValue('--dpad')) + 32}px` : '';
+  stage.classList.toggle('touch-side', layout === 'touch-side');
+  stage.classList.toggle('touch-bottom', layout === 'touch-bottom');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
   gameCanvas.style.width = `${WORLD_W * s}px`;
   gameCanvas.style.height = `${WORLD_H * s}px`;
   gameCanvas.width = Math.round(WORLD_W * s * dpr);
@@ -839,6 +918,7 @@ function resizeGame() {
   canvasScale = s * dpr;
 }
 window.addEventListener('resize', () => { if (isActive('play')) resizeGame(); });
+window.addEventListener('orientationchange', () => setTimeout(() => { if (isActive('play')) resizeGame(); }, 200));
 document.addEventListener('fullscreenchange', () => setTimeout(resizeGame, 50));
 
 // Click the paper (in build mode) to move the start flag.
@@ -859,7 +939,8 @@ gameCanvas.addEventListener('pointerdown', (e) => {
 
 // Hide the toolbar in fullscreen when the mouse is idle.
 let idleTimer;
-document.addEventListener('pointermove', () => {
+document.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse') return;
   $('toolbar').classList.remove('hidden');
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => { if (document.fullscreenElement) $('toolbar').classList.add('hidden'); }, 3000);

@@ -1,0 +1,14 @@
+{
+  "name": "Paper Platformer",
+  "short_name": "Platformer",
+  "description": "Draw a level with markers. The camera turns it into a game you can play.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#14161c",
+  "theme_color": "#14161c",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
