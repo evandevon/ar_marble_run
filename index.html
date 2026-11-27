@@ -79,7 +79,11 @@
           <button id="btn-flipv" class="secondary" aria-pressed="false" title="Flip upside down">⇵ Flip</button>
         </div>
         <p class="hint small">Make the preview match what you see when you look at the paper.</p>
-        <button id="btn-lock" class="secondary">Lock colours</button>
+        <div class="row">
+          <button id="btn-lock" class="secondary">Lock colours</button>
+          <button id="btn-freeze" class="secondary" aria-pressed="false" hidden title="Hold the picture still while you set the corners">📸 Hold picture</button>
+        </div>
+        <p class="hint small" id="rotate-tip" hidden>Tip: turn on your phone's <b>rotation lock</b>, so the screen doesn't spin while the camera points down.</p>
         <p class="status" id="lock-status" role="status"></p>
       </div>
 
@@ -130,14 +134,16 @@
 
       <!-- On-screen controls for phones, tablets and touch panels -->
       <div class="touch" id="touch" aria-hidden="true">
+        <div class="tzone left" id="tz-left"></div>
+        <div class="tzone right" id="tz-right"></div>
         <div class="dpad" id="dpad">
           <span class="dp up">▲</span><span class="dp left">◀</span>
           <span class="dp right">▶</span><span class="dp down">▼</span>
           <span class="thumb" id="dpad-thumb"></span>
         </div>
         <div class="ab">
-          <button class="tbtn b" id="tb-b" tabindex="-1">B</button>
-          <button class="tbtn a" id="tb-a" tabindex="-1">A</button>
+          <span class="tbtn b" id="tb-b">B<small id="tb-b-lbl"></small></span>
+          <span class="tbtn a" id="tb-a">A<small id="tb-a-lbl"></small></span>
         </div>
       </div>
 
@@ -172,7 +178,9 @@
 
     <div class="toolbar" id="toolbar">
       <button id="btn-mode" class="primary run" title="Enter">▶ Play</button>
-      <button id="btn-restart" class="secondary" title="R" hidden>↻ Restart</button>
+      <button id="btn-snap" class="secondary" hidden title="Hold the camera picture still, or go back to live">📸 Snap</button>
+      <button id="btn-restart" class="secondary" title="R" hidden>↻<span class="lbl2"> Restart</span></button>
+      <button id="btn-zoom" class="secondary" title="Zoom in and follow the player (V)" aria-pressed="false" hidden>🔍<span class="lbl"> Zoom</span></button>
       <span class="mode-pill" id="mode-pill">BUILD</span>
       <div class="level-nav" id="level-nav" hidden>
         <button id="btn-prev-level" class="secondary" title="Previous level (PageUp)" aria-label="Previous level">◀</button>

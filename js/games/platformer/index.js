@@ -1,5 +1,5 @@
 // Platformer: run and jump a stick figure across the level you drew.
-import { Level, Game } from './physics.js';
+import { Level, Game, setFeel } from './physics.js';
 import { drawBuild, drawPlay, hudItems } from './draw.js';
 import { playEvent } from './fx.js';
 import { makeDemo } from './demo.js';
@@ -11,11 +11,14 @@ export default {
   tagline: 'Run and jump a stick figure across the level you drew.',
   colours: { black: 'Ground', blue: 'Trampoline', red: 'Danger', green: 'Goal', orange: 'Coins' },
   buildHint: 'Draw, then press Play. Click the paper to move the start flag.',
-  playHint: '← → run · Space or ↑ jump · R restart',
+  playHint: '← → move · Space or ↑ jump · hold Shift to run · R restart',
+  // What the A and B buttons do (shown on the touch buttons).
+  buttons: { a: 'Jump', b: 'Run' },
   usesStart: true,
   defaultStart: { x: 80, y: 560 },
   settings: [
     { id: 'lives', label: 'Lives', value: '3', options: [['3', '3'], ['5', '5'], ['Infinity', 'Unlimited']] },
+    { id: 'feel', label: 'Feel', value: 'normal', options: [['floaty', 'Floaty'], ['normal', 'Normal'], ['snappy', 'Snappy']] },
   ],
 
   makeDemo,
@@ -43,23 +46,32 @@ export default {
 
   create({ det, start, settings, W, H }) {
     const lives = settings.lives === 'Infinity' ? Infinity : Number(settings.lives) || 3;
+    setFeel(settings.feel);
     const game = new Game(new Level(det, W, H), start, lives);
     game.events.push({ type: 'spawn', x: game.player.x, y: game.player.y });
     return {
       get state() { return game.state; },
       game,
       update(input, fx, sfx) {
+        // A (or up on a keyboard or controller) jumps; B runs. Up on the touch
+        // D-pad doesn't jump: thumbs drift upwards while running.
         game.update({
           left: input.left,
           right: input.right,
-          jumpHeld: input.up || input.a || input.b,
-          jumpPressed: input.upPressed || input.aPressed || input.bPressed,
+          jumpHeld: input.upKey || input.a,
+          jumpPressed: input.upKeyPressed || input.aPressed,
+          run: input.b,
         });
         for (const e of game.events) playEvent(e, fx, sfx);
         game.events.length = 0;
       },
       draw(ctx, view) { drawPlay(ctx, game, view); },
       hud() { return hudItems(game); },
+      // What the zoomed-in view follows.
+      focus() {
+        const p = game.player;
+        return { x: p.x, y: p.y - 24, vx: p.vx, facing: p.facing };
+      },
       restart() { game.restart(); },
       endCard() {
         const won = game.state === 'won';

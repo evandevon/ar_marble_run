@@ -23,7 +23,7 @@ const SETTINGS_KEY = 'paper-platformer.settings.v1';
 const STEP_MS = 1000 / 60;
 const LAST_GAME_KEY = 'paper-arcade.game';
 
-const VERSION = '2026-11-27.2';
+const VERSION = '2026-11-27.3';
 const $ = (id) => document.getElementById(id);
 document.getElementById('version').textContent = `Version ${VERSION}`;
 
@@ -38,6 +38,8 @@ const app = {
   gameDef: GAMES[0],       // the chosen game module (js/games/…)
   gameSettings: {},       // per game: { [gameId]: { settingId: value } }
   touchMode: 'auto',      // on-screen controls: auto | on | off
+  zoom: 'auto',           // zoomed-in view while playing: auto (touch screens) | on | off
+  cam: { x: 500, y: 350, lead: 0 },   // the zoomed view's centre, in paper pixels
   sawTouch: false,        // a finger has touched the screen this session
   currentLevelId: null,   // set while playing a saved level
   levelIds: [],           // the library order, for previous / next
@@ -68,13 +70,14 @@ function loadSettings() {
     if (st.gameSettings && typeof st.gameSettings === 'object') app.gameSettings = st.gameSettings;
     else if (st.lives) app.gameSettings = { platformer: { lives: String(st.lives) } };
     if (['auto', 'on', 'off'].includes(st.touchMode)) app.touchMode = st.touchMode;
+    if (['auto', 'on', 'off'].includes(st.zoom)) app.zoom = st.zoom;
   } catch { /* storage unavailable */ }
 }
 function saveSettings() {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
       orient: app.orient, samples: app.vision.samples, colourMatch: app.vision.colourMatch,
-      gameSettings: app.gameSettings, touchMode: app.touchMode,
+      gameSettings: app.gameSettings, touchMode: app.touchMode, zoom: app.zoom,
     }));
   } catch { /* storage unavailable */ }
 }
@@ -149,6 +152,8 @@ function chooseGame(id, { remember = true } = {}) {
     box.appendChild(label);
   }
   $('lib-title').textContent = `Class levels: ${g.name}`;
+  $('tb-a-lbl').textContent = g.buttons?.a || '';
+  $('tb-b-lbl').textContent = g.buttons?.b || '';
   app.start = { ...g.defaultStart };
 }
 
@@ -188,7 +193,7 @@ const isActive = (id) => $(id).classList.contains('active');
 function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
   if (id === 'play') resizeGame();
-  if (id === 'setup') resizeSetup();
+  if (id === 'setup') { resizeSetup(); updateFreezeButtons(); }
   if (id === 'library') renderLibrary();
 }
 document.querySelectorAll('[data-goto]').forEach((b) =>
@@ -200,7 +205,22 @@ function stopSource() {
 }
 
 // ---------------------------------------------------------------- start screen
+// Phones: go full screen and stay landscape, so the screen doesn't spin round
+// while the phone points down at the paper. (Android allows this; iPhones and
+// iPads don't, so they get a tip to use rotation lock instead.)
+const smallTouch = () => window.matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820;
+function holdLandscape() {
+  if (!smallTouch()) return;
+  const full = document.fullscreenElement ? Promise.resolve()
+    : document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+  Promise.resolve(full)
+    .then(() => (screen.orientation?.lock ? screen.orientation.lock('landscape') : Promise.reject()))
+    .then(() => { $('rotate-tip').hidden = true; })
+    .catch(() => { $('rotate-tip').hidden = false; });
+}
+
 $('btn-screen').addEventListener('click', async () => {
+  holdLandscape();
   show('setup');
   $('step-camera').hidden = false;
   $('camera-select').closest('.field').hidden = false;
@@ -250,6 +270,7 @@ async function startWebcam(deviceId) {
     await app.source.start(deviceId);
     app.source.setOrientation(app.orient);
     updateOrientButtons();
+    updateFreezeButtons();
     status.textContent = '';
     await fillCameraList(deviceId);
     loadSavedCorners();
@@ -285,6 +306,53 @@ $('btn-lock').addEventListener('click', async () => {
   status.textContent = res.msg;
 });
 
+// ---------------------------------------------------------------- holding the picture still
+function updateFreezeButtons() {
+  const cam = app.source?.kind === 'webcam';
+  const frozen = !!app.source?.frozen;
+  $('btn-freeze').hidden = !cam;
+  $('btn-freeze').setAttribute('aria-pressed', String(frozen));
+  $('btn-freeze').textContent = frozen ? '🎥 Back to live' : '📸 Hold picture';
+  $('btn-snap').hidden = !cam || app.mode === 'play';
+  $('btn-snap').textContent = frozen ? '🎥 Live' : '📸 Snap';
+}
+$('btn-freeze').addEventListener('click', () => {
+  if (!app.source?.freeze) return;
+  if (app.source.frozen) app.source.unfreeze();
+  else { app.source.freeze(); if (app.corners.length < 4) findMarks(true); }
+  updateFreezeButtons();
+});
+// While building: snap a still picture of the drawing (and find the sheet's
+// corners again, in case the phone moved), or go back to the live camera.
+$('btn-snap').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  if (!app.source?.freeze) return;
+  if (app.source.frozen) {
+    app.source.unfreeze();
+    toast('Live camera', 1200);
+  } else {
+    app.source.freeze();
+    const pts = findCornerMarks(app.source.capture());
+    if (pts) { setCorners(pts); useCorners(); }
+    toast(pts ? 'Picture held ✓ (found the sheet corners)' : 'Picture held ✓', 1800);
+  }
+  scan(true);
+  updateFreezeButtons();
+});
+// The camera picture changed shape (a phone turned): the corners no longer line up.
+function cameraTurned() {
+  app.source.sizeChanged = false;
+  if (isActive('setup')) {
+    setCorners([]);
+    resizeSetup();
+    findMarks(true);
+  } else if (isActive('play')) {
+    const pts = findCornerMarks(app.source.capture());
+    if (pts) { setCorners(pts); useCorners(); scan(true); }
+    else toast('The camera picture turned. Press ⚙ Setup to set the corners again.', 3500);
+  }
+}
+
 // ---------------------------------------------------------------- orientation
 function updateOrientButtons() {
   const o = app.source?.orient || app.orient;
@@ -304,6 +372,7 @@ function changeOrientation(change) {
   loadSavedCorners();
   resizeSetup();
   updateOrientButtons();
+  updateFreezeButtons();
 }
 $('btn-rotate').addEventListener('click', () => changeOrientation('rotate'));
 $('btn-fliph').addEventListener('click', () => changeOrientation('flipH'));
@@ -429,12 +498,18 @@ $('btn-play').addEventListener('click', () => {
   saveSetup();
   app.currentLevelId = null;
   updateLevelNav();
-  const paper = [{ x: 0, y: 0 }, { x: WORLD_W, y: 0 }, { x: WORLD_W, y: WORLD_H }, { x: 0, y: WORLD_H }];
-  app.H = computeHomography(paper, app.corners);
+  useCorners();
   show('play');
   setMode('build');
   scan(true);
 });
+
+// Map the paper onto the four corners.
+function useCorners() {
+  const paper = [{ x: 0, y: 0 }, { x: WORLD_W, y: 0 }, { x: WORLD_W, y: WORLD_H }, { x: 0, y: WORLD_H }];
+  app.H = computeHomography(paper, app.corners);
+  saveSetup();
+}
 
 // Look for the printed sheet's four corner squares and use them as the corners.
 function findMarks(quiet = false) {
@@ -494,6 +569,9 @@ function setMode(mode) {
   } else {
     app.session = null;
   }
+  $('btn-zoom').hidden = !(play && app.session?.focus);
+  updateFreezeButtons();
+  resizeGame();   // the zoomed view needs the session
 }
 
 function restart() {
@@ -501,11 +579,13 @@ function restart() {
   $('win').hidden = true;
   app.effects.clear();
   app.session.restart();
+  updateCamera(true);
 }
 
 const blurAfter = (fn) => (e) => { e.currentTarget.blur(); fn(); };
 $('btn-mode').addEventListener('click', blurAfter(() => setMode(app.mode === 'play' ? 'build' : 'play')));
 $('btn-restart').addEventListener('click', blurAfter(restart));
+$('btn-zoom').addEventListener('click', blurAfter(toggleZoom));
 $('btn-again').addEventListener('click', blurAfter(restart));
 $('btn-tobuild').addEventListener('click', blurAfter(() => setMode('build')));
 $('btn-view').addEventListener('click', blurAfter(toggleView));
@@ -530,6 +610,7 @@ function toggleSound() {
 if (!document.fullscreenEnabled) $('btn-full').hidden = true;
 function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen();
+  else if (smallTouch()) holdLandscape();
   else document.documentElement.requestFullscreen?.();
 }
 
@@ -887,6 +968,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.code === 'KeyF') toggleFullscreen();
   else if (e.code === 'KeyC') toggleView();
   else if (e.code === 'KeyM') toggleSound();
+  else if (e.code === 'KeyV' && app.mode === 'play') toggleZoom();
   else if (e.code === 'PageDown' && app.currentLevelId) { e.preventDefault(); stepLevel(1); }
   else if (e.code === 'PageUp' && app.currentLevelId) { e.preventDefault(); stepLevel(-1); }
 });
@@ -894,7 +976,9 @@ document.addEventListener('keyup', (e) => input.keyUp(e.code));
 window.addEventListener('blur', () => input.clear());
 
 // ---------------------------------------------------------------- touch controls
-const touch = new TouchControls({ dpad: $('dpad'), thumb: $('dpad-thumb'), a: $('tb-a'), b: $('tb-b') });
+const touch = new TouchControls({
+  left: $('tz-left'), right: $('tz-right'), dpad: $('dpad'), thumb: $('dpad-thumb'), a: $('tb-a'), b: $('tb-b'),
+});
 const input = new Input(touch);
 const padState = {};
 const coarse = window.matchMedia('(pointer: coarse)');
@@ -965,11 +1049,61 @@ function resizeGame() {
   stage.classList.toggle('touch-side', layout === 'touch-side');
   stage.classList.toggle('touch-bottom', layout === 'touch-bottom');
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  gameCanvas.style.width = `${WORLD_W * s}px`;
-  gameCanvas.style.height = `${WORLD_H * s}px`;
-  gameCanvas.width = Math.round(WORLD_W * s * dpr);
-  gameCanvas.height = Math.round(WORLD_H * s * dpr);
+  let w = WORLD_W * s, h = WORLD_H * s;
+  app.zoomed = zoomActive();
+  if (app.zoomed) {
+    // Zoomed in: the view fills the whole stage, with the controls on top.
+    w = Math.floor(r.width);
+    h = Math.floor(r.height - (layout === 'touch-bottom' ? parseInt(stage.style.getPropertyValue('--dpad')) + 32 : 0));
+    const fit = Math.min(w / WORLD_W, h / WORLD_H);
+    app.zoomScale = Math.max(fit * ZOOM, w / WORLD_W, h / WORLD_H);
+  }
+  app.viewW = w;
+  app.viewH = h;
+  app.dpr = dpr;
+  gameCanvas.style.width = `${w}px`;
+  gameCanvas.style.height = `${h}px`;
+  gameCanvas.width = Math.round(w * dpr);
+  gameCanvas.height = Math.round(h * dpr);
   canvasScale = s * dpr;
+  $('btn-zoom').setAttribute('aria-pressed', String(app.zoomed));
+  if (app.zoomed) updateCamera(true);
+}
+
+// ---------------------------------------------------------------- zoomed view
+// While playing, the view can zoom in and follow the character (not for the
+// projector, where the picture has to line up with the paper).
+const ZOOM = 2.2;   // how far in, compared with seeing the whole page
+function zoomActive() {
+  if (app.mode !== 'play' || !app.session?.focus) return false;
+  return app.zoom === 'on' || (app.zoom === 'auto' && touchOn());
+}
+function toggleZoom() {
+  app.zoom = app.zoomed ? 'off' : 'on';
+  saveSettings();
+  resizeGame();
+  toast(app.zoomed ? 'Zoomed in 🔍' : 'Whole level', 1200);
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// Follow the character, looking a little ahead of where they're running.
+// Small hops don't move the view up and down; bigger climbs and falls do.
+function updateCamera(snap = false) {
+  const f = app.session?.focus?.();
+  if (!f || !app.zoomed) return;
+  const cam = app.cam;
+  const visW = app.viewW / app.zoomScale, visH = app.viewH / app.zoomScale;
+  const leadTarget = Math.abs(f.vx) > 0.5 ? Math.sign(f.vx) * visW * 0.14 : cam.lead;
+  cam.lead = snap ? 0 : cam.lead + (leadTarget - cam.lead) * 0.04;
+  const tx = f.x + cam.lead;
+  const ty = f.y - visH * 0.06;
+  if (snap) { cam.x = tx; cam.y = ty; }
+  else {
+    cam.x += (tx - cam.x) * 0.16;
+    const dz = visH * 0.14, dy = ty - cam.y;
+    if (Math.abs(dy) > dz) cam.y += (dy - Math.sign(dy) * dz) * 0.2;
+  }
+  cam.x = visW >= WORLD_W ? WORLD_W / 2 : clamp(cam.x, visW / 2, WORLD_W - visW / 2);
+  cam.y = visH >= WORLD_H ? WORLD_H / 2 : clamp(cam.y, visH / 2, WORLD_H - visH / 2);
 }
 window.addEventListener('resize', () => { if (isActive('play')) resizeGame(); });
 window.addEventListener('orientationchange', () => setTimeout(() => { if (isActive('play')) resizeGame(); }, 200));
@@ -1024,7 +1158,16 @@ function showEnd(kind) {
 // ---------------------------------------------------------------- drawing
 function drawScene(now) {
   const ctx = gameCtx;
-  ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
+  const zoomed = app.zoomed && app.mode === 'play' && app.session;
+  if (zoomed) {
+    const d = app.dpr, z = app.zoomScale;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#0d0f14';
+    ctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+    ctx.setTransform(d * z, 0, 0, d * z, d * (app.viewW / 2 - app.cam.x * z), d * (app.viewH / 2 - app.cam.y * z));
+  } else {
+    ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
+  }
   ctx.imageSmoothingEnabled = true;
   // 1. The paper: the camera image, or a clean redraw of what was detected
   if (app.view === 'camera') {
@@ -1047,7 +1190,41 @@ function drawScene(now) {
   }
   if (app.mode === 'play' && app.session) app.session.draw(ctx, { det: app.det, now });
   app.effects.draw(ctx);
-  if (app.mode === 'play' && app.session) drawHud(ctx, app.session.hud());
+  if (zoomed) {
+    // Status panel and mini-map stay put on the screen, at a readable size.
+    const hs = app.dpr * clamp(app.viewH / 520, 0.6, 1);
+    ctx.setTransform(hs, 0, 0, hs, 0, 0);
+    drawHud(ctx, app.session.hud());
+    drawMiniMap(ctx);
+  } else if (app.mode === 'play' && app.session) drawHud(ctx, app.session.hud());
+}
+
+// A small picture of the whole level, so you can still see where the goal is.
+function drawMiniMap(ctx) {
+  const d = app.dpr;
+  const w = Math.round(clamp(app.viewW * 0.2, 90, 170)), h = Math.round(w * WORLD_H / WORLD_W);
+  const x = app.viewW - w - 10, y = 10;
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  ctx.save();
+  ctx.globalAlpha = 0.88;
+  ctx.fillStyle = '#fbfaf6';
+  ctx.fillRect(x, y, w, h);
+  ctx.drawImage(app.view === 'camera' ? app.paperCanvas : app.cleanCanvas, x, y, w, h);
+  ctx.globalAlpha = 1;
+  const k = w / WORLD_W;
+  const visW = app.viewW / app.zoomScale, visH = app.viewH / app.zoomScale;
+  ctx.strokeStyle = 'rgba(25,195,255,0.95)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x + (app.cam.x - visW / 2) * k, y + (app.cam.y - visH / 2) * k, Math.min(w, visW * k), Math.min(h, visH * k));
+  const f = app.session.focus();
+  ctx.fillStyle = '#e0157f';
+  ctx.beginPath();
+  ctx.arc(x + f.x * k, y + f.y * k, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  ctx.restore();
 }
 
 // ---------------------------------------------------------------- main loop
@@ -1056,6 +1233,7 @@ let acc = 0;
 function frame(now) {
   const dt = Math.min(100, now - last);
   last = now;
+  if (app.source?.sizeChanged) cameraTurned();
   if (isActive('setup')) drawSetup();
   if (isActive('play') && app.source) {
     if (app.mode === 'build') scan();
@@ -1076,6 +1254,7 @@ function frame(now) {
         if (!$('win').hidden && (inp.aPressed || inp.upPressed)) restart();
       }
       app.effects.update();
+      updateCamera();
     }
     drawScene(now);
   }

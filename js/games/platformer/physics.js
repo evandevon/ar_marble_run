@@ -9,10 +9,8 @@ export const PLAYER = {
   h: 42,            // hitbox height
   gravity: 0.5,
   jumpV: 10.2,      // ~104 px jump height
-  runMax: 4.2,
-  accel: 0.55,
-  airAccel: 0.32,
-  friction: 0.72,
+  runMax: 4.2,      // walking top speed (the jump guide uses this)
+  runBoost: 1.4,    // holding B / Shift: run this much faster
   maxFall: 13,
   stepUp: 9,        // can walk up bumps/slopes this tall
   coyote: 6,        // frames you can still jump after running off a ledge
@@ -31,6 +29,18 @@ PLAYER.bounceCeiling = 4;  // safety ceiling for pumped bounces
 export const heightFor = (v) => (v * v) / (2 * PLAYER.gravity) - v / 2;
 export const speedFor = (h) => (PLAYER.gravity + Math.sqrt(PLAYER.gravity ** 2 + 8 * PLAYER.gravity * Math.max(0, h))) / 2;
 PLAYER.jumpHeight = heightFor(PLAYER.jumpV);
+
+// How the character speeds up and stops. Chosen under Tune → Feel.
+//   accel / airAccel   speed gained per step while a direction is held
+//   turn / airTurn     extra grip when pushing against your current direction
+//   friction / airDrag speed kept per step when nothing is held (lower = stops sooner)
+export const FEELS = {
+  floaty: { accel: 0.55, airAccel: 0.32, turn: 0, airTurn: 0, friction: 0.72, airDrag: 0.96 },
+  normal: { accel: 1.05, airAccel: 0.6, turn: 0.7, airTurn: 0.35, friction: 0.45, airDrag: 0.93 },
+  snappy: { accel: 2.1, airAccel: 1.0, turn: 1.5, airTurn: 0.8, friction: 0.2, airDrag: 0.85 },
+};
+export function setFeel(name) { Object.assign(PLAYER, FEELS[name] || FEELS.normal); }
+setFeel('normal');
 PLAYER.bounceV = speedFor(PLAYER.bounceAuto * PLAYER.jumpHeight);
 PLAYER.bounceMaxV = speedFor(PLAYER.bounceMax * PLAYER.jumpHeight);
 
@@ -121,13 +131,20 @@ export class Player {
 
     // --- horizontal intent
     const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const top = input.run ? P.runMax * P.runBoost : P.runMax;
     if (dir) {
-      this.vx += dir * (this.onGround ? P.accel : P.airAccel);
-      this.vx = Math.max(-P.runMax, Math.min(P.runMax, this.vx));
+      const ground = this.onGround;
+      let a = ground ? P.accel : P.airAccel;
+      if (this.vx * dir < 0) a += ground ? P.turn : P.airTurn;   // turning round
+      const before = this.vx * dir;
+      this.vx += dir * a;
+      // Over top speed: hold it there. If you were already faster (you just let
+      // go of run), ease down rather than stopping dead.
+      if (this.vx * dir > top) this.vx = dir * (before > top ? Math.max(top, before - (ground ? 0.5 : 0.15)) : top);
       this.facing = dir;
     } else {
-      this.vx *= this.onGround ? P.friction : 0.96;
-      if (Math.abs(this.vx) < 0.05) this.vx = 0;
+      this.vx *= this.onGround ? P.friction : P.airDrag;
+      if (Math.abs(this.vx) < 0.15) this.vx = 0;
     }
 
     // --- jumping (with coyote time and input buffering so it feels fair)

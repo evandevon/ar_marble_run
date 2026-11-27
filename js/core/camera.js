@@ -72,6 +72,36 @@ export class WebcamSource extends OrientedSource {
   get rawSize() { return { w: this.video.videoWidth || 1, h: this.video.videoHeight || 1 }; }
   get rawElement() { return this.video; }
 
+  setOrientation(o) { this.frozen = null; super.setOrientation(o); }
+
+  resize() {
+    super.resize();
+    const { w, h } = this.rawSize;
+    this.lastRaw = `${w}x${h}`;
+  }
+
+  draw() {
+    if (this.frozen) return this.canvas;
+    // Phones swap the video's width and height when the screen turns.
+    const { w, h } = this.rawSize;
+    if (`${w}x${h}` !== this.lastRaw) { this.resize(); this.sizeChanged = true; }
+    return super.draw();
+  }
+
+  capture() {
+    if (this.frozen) return this.frozen;
+    return super.capture();
+  }
+
+  // Hold the current picture still (handy when the phone is the camera and
+  // you can't keep it perfectly steady). unfreeze() goes back to live video.
+  freeze() {
+    this.frozen = null;
+    super.capture();
+    this.frozen = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+  }
+  unfreeze() { this.frozen = null; }
+
   async start(deviceId) {
     this.stop();
     const video = {
@@ -109,6 +139,7 @@ export class WebcamSource extends OrientedSource {
   stop() {
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     this.stream = null;
+    this.frozen = null;
   }
 }
 

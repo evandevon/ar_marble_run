@@ -33,12 +33,19 @@ Print **[template.html](template.html)** (landscape, A4 or A3, black and white i
 
 1. **Build mode:** draw the level. The camera outlines what it sees in each colour. Click the paper to move the start flag. The dotted arcs show how far and high the character can jump, and how high trampolines can bounce with and without a jump.
 2. Press **Play** (or Enter). The level freezes and the stick figure appears.
-3. **← →** (or A/D) to run, **Space / ↑ / W** to jump. Hold jump for a higher jump. **R** restarts.
+3. **← →** (or A/D) to move, **Space / ↑ / W** to jump, hold **Shift** (or X) to run faster. Hold jump for a higher jump. **R** restarts.
 4. Reach the green goal. You have 3 lives (change this under **Tune**). Press **Build** to change the drawing and try again.
 
-On phones, tablets and touch screens, on-screen controls appear when you play: a D-pad on the left (left/right to run, up to jump) and **A** / **B** on the right (both jump for now). They sit beside the level in landscape and below it in portrait. Turn them on or off under **Tune → Touch controls**. On phones, the camera starts with the back camera. Add the page to your home screen to play full screen.
+**Tune → Feel** changes how quickly the character speeds up and stops: Floaty, Normal (the default) or Snappy.
 
-Game controllers work too: stick or d-pad to move, A to jump, Y to restart, Start to switch between Build and Play.
+### Phones and tablets
+
+- **Touch controls** appear when you play. Put your left thumb anywhere on the left half of the screen and slide: the D-pad comes to your thumb, so there's nothing to find. Tap anywhere on the right half for the nearest button: **A** jumps and **B** runs. Up on the touch D-pad doesn't jump, because thumbs drift upwards while running. Turn the controls on or off under **Tune → Touch controls**.
+- **Zoom:** on touch screens, the view zooms in and follows the character, with a mini-map of the whole level in the corner. Press **🔍** (or **V**) to switch between zoomed and the whole level, on any screen. Build mode always shows the whole page. (Zoom won't apply to projector mode, where the picture has to line up with the paper.)
+- **Using the phone as the camera:** **Screen mode** goes full screen and holds the screen sideways, so it doesn't spin round while the phone points down. (Android only. On iPhone and iPad, turn on rotation lock.) In setup, **📸 Hold picture** freezes the preview so you can set the corners without keeping perfectly still. While building, **📸 Snap** takes a still picture of the drawing (and finds the level sheet's corners again if the phone moved); **🎥 Live** goes back to the camera.
+- Add the page to your home screen to play full screen.
+
+Game controllers work too: stick or d-pad to move, A to jump, B to run, Y to restart, Start to switch between Build and Play.
 
 No camera? Try the built-in demo level, or a photo of a drawing.
 
@@ -88,6 +95,7 @@ Fixes are colour examples, so one fix covers every mark in that marker, and any 
 | Key | Action |
 |---|---|
 | C | Camera view / clean view |
+| V | Zoom in on the player / whole level |
 | M | Sound on/off |
 | F | Fullscreen |
 | Esc | Back to Build |

@@ -3,6 +3,8 @@
 //
 //   { left, right, up, down, a, b }                       held this step
 //   { upPressed, downPressed, aPressed, bPressed }        newly pressed this step
+//   { upKey, upKeyPressed }   up from the keyboard or a controller only (not the
+//                             touch D-pad), for games where up means jump
 //
 //   Keyboard  arrows or WASD to move · A button: Space or Z · B button: X or Shift
 //   Gamepad   stick or d-pad to move · A / B buttons
@@ -58,6 +60,7 @@ export class Input {
       this.padWas[pad.index] = now;
     }
 
+    const upKey = held.up, upKeyPressed = pressed.up;
     if (this.touch) {
       const t = this.touch.read();
       for (const n of NAMES) {
@@ -69,6 +72,7 @@ export class Input {
       ...held,
       upPressed: pressed.up, downPressed: pressed.down, aPressed: pressed.a, bPressed: pressed.b,
       leftPressed: pressed.left, rightPressed: pressed.right,
+      upKey, upKeyPressed,
     };
   }
 }
