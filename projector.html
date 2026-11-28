@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paper Arcade · Projector</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    body.full { cursor: none; }
+    #lost { position: fixed; inset: 0; display: none; place-items: center; color: #fff;
+      font: 20px system-ui, sans-serif; text-align: center; padding: 2em; }
+  </style>
+</head>
+<body>
+  <canvas id="c" aria-label="Projected game"></canvas>
+  <div id="lost">This window works with Paper Arcade. Open it from <b>Projector mode</b> on the main screen.</div>
+  <script>
+    // Everything here is driven by the main Paper Arcade window: this page just
+    // shows what it draws, goes full screen when clicked, and passes keys back.
+    const canvas = document.getElementById('c');
+    const main = () => { try { return window.opener && !window.opener.closed ? window.opener.paperArcade : null; } catch { return null; } };
+
+    function connect() {
+      const pa = main();
+      if (!pa) { document.getElementById('lost').style.display = 'grid'; return; }
+      pa.projectorReady(window, canvas);
+      requestAnimationFrame(loop);
+    }
+    // Draw every frame from here too, so the game keeps going even when the
+    // main window is covered up (e.g. a mirrored screen).
+    function loop() {
+      const pa = main();
+      if (!pa) { document.getElementById('lost').style.display = 'grid'; return; }
+      pa.tick();
+      requestAnimationFrame(loop);
+    }
+
+    document.addEventListener('click', () => {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+    });
+    document.addEventListener('dblclick', () => { if (document.fullscreenElement) document.exitFullscreen(); });
+    document.addEventListener('fullscreenchange', () => document.body.classList.toggle('full', !!document.fullscreenElement));
+    // Keys pressed while this window is in front still play the game.
+    document.addEventListener('keydown', (e) => main()?.keyDown(e));
+    document.addEventListener('keyup', (e) => main()?.keyUp(e));
+    window.addEventListener('blur', () => main()?.clearKeys());
+    connect();
+  </script>
+</body>
+</html>

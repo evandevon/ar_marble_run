@@ -13,6 +13,7 @@ import { findCornerMarks } from './core/markers.js';
 import { TouchControls } from './core/touch.js';
 import { Input, GAME_KEYS, padButtonsPressed } from './core/input.js';
 import { GAMES, COMING_SOON, getGame } from './games/index.js';
+import { Projector } from './core/projector.js';
 
 // The game world is the flattened paper, in "paper pixels" (A-series ratio).
 const WORLD_W = 1000;
@@ -23,7 +24,7 @@ const SETTINGS_KEY = 'paper-platformer.settings.v1';
 const STEP_MS = 1000 / 60;
 const LAST_GAME_KEY = 'paper-arcade.game';
 
-const VERSION = '2026-11-27.3';
+const VERSION = '2026-11-28.1';
 const $ = (id) => document.getElementById(id);
 document.getElementById('version').textContent = `Version ${VERSION}`;
 
@@ -55,6 +56,7 @@ const app = {
   paperCanvas: Object.assign(document.createElement('canvas'), { width: WORLD_W, height: WORLD_H }),
   cleanCanvas: document.createElement('canvas'),
   lastScan: 0,
+  projMode: false,        // projector mode: the game is projected onto the board
 };
 app.paperCtx = app.paperCanvas.getContext('2d');
 
@@ -221,6 +223,7 @@ function holdLandscape() {
 
 $('btn-screen').addEventListener('click', async () => {
   holdLandscape();
+  setProjMode(false);
   show('setup');
   $('step-camera').hidden = false;
   $('camera-select').closest('.field').hidden = false;
@@ -229,6 +232,7 @@ $('btn-screen').addEventListener('click', async () => {
 });
 
 $('btn-demo').addEventListener('click', () => {
+  setProjMode(false);
   const demo = app.gameDef.makeDemo();
   app.source = new ImageSource(demo.canvas);
   app.start = demo.start;
@@ -242,6 +246,7 @@ $('photo-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const img = await loadImageFile(file);
+  setProjMode(false);
   app.source = new ImageSource(img);
   $('step-camera').hidden = false;
   $('camera-select').closest('.field').hidden = true;
@@ -275,7 +280,7 @@ async function startWebcam(deviceId) {
     await fillCameraList(deviceId);
     loadSavedCorners();
     resizeSetup();
-    if (app.corners.length < 4) setTimeout(() => findMarks(true), 600);
+    if (app.corners.length < 4 && !app.projMode) setTimeout(() => findMarks(true), 600);
   } catch (err) {
     status.className = 'status warn';
     status.textContent = err.name === 'NotAllowedError'
@@ -310,10 +315,10 @@ $('btn-lock').addEventListener('click', async () => {
 function updateFreezeButtons() {
   const cam = app.source?.kind === 'webcam';
   const frozen = !!app.source?.frozen;
-  $('btn-freeze').hidden = !cam;
+  $('btn-freeze').hidden = !cam || app.projMode;
   $('btn-freeze').setAttribute('aria-pressed', String(frozen));
   $('btn-freeze').textContent = frozen ? '🎥 Back to live' : '📸 Hold picture';
-  $('btn-snap').hidden = !cam || app.mode === 'play';
+  $('btn-snap').hidden = !cam || app.mode === 'play' || app.projMode;
   $('btn-snap').textContent = frozen ? '🎥 Live' : '📸 Snap';
 }
 $('btn-freeze').addEventListener('click', () => {
@@ -342,6 +347,15 @@ $('btn-snap').addEventListener('click', (e) => {
 // The camera picture changed shape (a phone turned): the corners no longer line up.
 function cameraTurned() {
   app.source.sizeChanged = false;
+  if (app.projMode) {
+    const had = app.corners.length === 4;
+    setCorners([]);
+    resizeSetup();
+    if (!had) return;   // the camera just started up: nothing to redo
+    projStatus('The camera picture changed. Press Line up again.', 'warn');
+    if (isActive('play')) toast('The camera picture changed. Press ⚙ Setup and Line up again.', 3500);
+    return;
+  }
   if (isActive('setup')) {
     setCorners([]);
     resizeSetup();
@@ -370,6 +384,7 @@ function changeOrientation(change) {
   if (app.source.kind === 'webcam') { app.orient = o; saveSettings(); }
   setCorners([]);            // the old corners no longer line up
   loadSavedCorners();
+  if (app.projMode) projStatus('The camera turned. Press Line up again.', 'warn');
   resizeSetup();
   updateOrientButtons();
   updateFreezeButtons();
@@ -395,6 +410,7 @@ function setCorners(pts) {
 }
 
 function loadSavedCorners() {
+  if (app.projMode) { $('btn-saved-corners').hidden = true; return; }
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
     const ok = saved && app.source.kind === 'webcam' && saved.w === app.source.width && saved.h === app.source.height
@@ -407,7 +423,7 @@ function loadSavedCorners() {
   } catch { /* storage unavailable */ }
 }
 function saveSetup() {
-  if (app.source?.kind !== 'webcam') return;
+  if (app.source?.kind !== 'webcam' || app.projMode) return;
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       w: app.source.width, h: app.source.height, orient: app.source.orient, corners: app.corners, start: app.start,
@@ -951,7 +967,7 @@ $('import-ok').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------- input
-document.addEventListener('keydown', (e) => {
+function onKeyDown(e) {
   if (!isActive('play')) return;
   // Typing in a box (level names, etc.) must never control the game.
   const t = e.target;
@@ -965,13 +981,14 @@ document.addEventListener('keydown', (e) => {
   else if (e.code === 'Escape' && app.fixing) setFixing(false);
   else if (e.code === 'Escape' && app.mode === 'play') setMode('build');
   else if (e.code === 'KeyR') restart();
-  else if (e.code === 'KeyF') toggleFullscreen();
+  else if (e.code === 'KeyF' && e.view === window) toggleFullscreen();   // the projector window does its own
   else if (e.code === 'KeyC') toggleView();
   else if (e.code === 'KeyM') toggleSound();
-  else if (e.code === 'KeyV' && app.mode === 'play') toggleZoom();
+  else if (e.code === 'KeyV' && app.mode === 'play' && !app.projMode) toggleZoom();
   else if (e.code === 'PageDown' && app.currentLevelId) { e.preventDefault(); stepLevel(1); }
   else if (e.code === 'PageUp' && app.currentLevelId) { e.preventDefault(); stepLevel(-1); }
-});
+}
+document.addEventListener('keydown', onKeyDown);
 document.addEventListener('keyup', (e) => input.keyUp(e.code));
 window.addEventListener('blur', () => input.clear());
 
@@ -1075,7 +1092,7 @@ function resizeGame() {
 // projector, where the picture has to line up with the paper).
 const ZOOM = 2.2;   // how far in, compared with seeing the whole page
 function zoomActive() {
-  if (app.mode !== 'play' || !app.session?.focus) return false;
+  if (app.mode !== 'play' || !app.session?.focus || app.projMode) return false;
   return app.zoom === 'on' || (app.zoom === 'auto' && touchOn());
 }
 function toggleZoom() {
@@ -1227,10 +1244,148 @@ function drawMiniMap(ctx) {
   ctx.restore();
 }
 
+// ---------------------------------------------------------------- projector mode
+// The game is projected onto the whiteboard, on top of the drawing. The main
+// screen works as usual (setup, camera view, Fix colours); a second window,
+// shown by the projector, draws only the moving parts on black, so the ink on
+// the board stays the level.
+const projector = new Projector({ worldW: WORLD_W, worldH: WORLD_H, onState: updateProjectorUI });
+
+function setProjMode(on) {
+  app.projMode = on;
+  $('step-projector').hidden = !on;
+  $('step-corners').hidden = on;
+  $('camera-hint').textContent = on
+    ? 'Point the camera at the whiteboard so it sees the whole projected picture. A slight angle is fine.'
+    : 'Point the camera straight down at the paper or whiteboard. Even light, no lamp right above.';
+  $('setup-canvas').setAttribute('aria-label', on
+    ? 'Camera preview. The blue outline shows the part of the board the game uses.'
+    : 'Camera preview. Click the four corners of the paper.');
+  if (!on) projector.close();
+  updateFreezeButtons();
+  updateProjectorUI();
+}
+function projStatus(msg, kind = '') {
+  const el = $('proj-status');
+  el.className = 'status ' + kind;
+  el.textContent = msg;
+}
+let lastProjSig = '';
+function updateProjectorUI() {
+  if (!app.projMode) return;
+  const open = projector.open;
+  $('btn-proj-open').textContent = open ? '📽️ Show projector window' : '📽️ Open projector window';
+  $('btn-proj-lineup').disabled = !open || app.source?.kind !== 'webcam' || app.lining;
+  // Tell the teacher once each time something changes that matters.
+  const sig = `${open}|${projector.fullscreen}|${projector.stale}`;
+  if (sig === lastProjSig) return;
+  lastProjSig = sig;
+  if (app.lining) return;
+  if (!open) projStatus(projector.cal ? 'The projector window was closed. Open it again, then Line up.' : '');
+  else if (projector.stale) {
+    projStatus('The projector window changed size. Press Line up again.', 'warn');
+    if (isActive('play')) toast('The projector window changed size. Press ⚙ Setup and Line up again.', 3500);
+  } else if (!projector.cal) projStatus(projector.fullscreen
+    ? 'Projector window is full screen ✓ Now press Line up.'
+    : 'Projector window open. Drag it onto the projector, click it to fill the screen, then press Line up.');
+}
+
+$('btn-projector').addEventListener('click', async () => {
+  setProjMode(true);
+  show('setup');
+  $('step-camera').hidden = false;
+  $('camera-select').closest('.field').hidden = false;
+  $('btn-lock').hidden = false;
+  // A line-up from earlier still holds if nothing has moved since.
+  if (!projector.cal || projector.stale || !projector.open) setCorners([]);
+  await startWebcam();
+  updateProjectorUI();
+});
+
+$('btn-proj-open').addEventListener('click', () => {
+  if (!projector.openWindow()) projStatus('The browser blocked the projector window. Allow pop-ups for this site, then try again.', 'warn');
+});
+
+$('btn-proj-lineup').addEventListener('click', async () => {
+  if (!projector.open || app.lining) return;
+  if (app.source?.frozen) { app.source.unfreeze(); updateFreezeButtons(); }
+  app.lining = true;
+  setCorners([]);
+  updateProjectorUI();
+  const res = await projector.lineUp(() => app.source.capture(), (m) => projStatus(m));
+  app.lining = false;
+  lastProjSig = '';
+  if (res.ok) {
+    setCorners(res.corners);
+    useCorners();
+  }
+  updateProjectorUI();
+  projStatus(res.msg, res.ok ? 'ok' : 'warn');
+});
+
+// What the projector shows, in level coordinates.
+function drawProjected(ctx, now) {
+  const ses = app.mode === 'play' ? app.session : null;
+  if (!ses) {
+    // Building: just the edges of the play area, so nothing coloured is
+    // projected onto the drawing while the camera is reading it.
+    ctx.strokeStyle = '#3a3a3a';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
+    ctx.strokeStyle = '#bbb';
+    ctx.lineWidth = 5;
+    const k = 46;
+    for (const [x, y, dx, dy] of [[0, 0, 1, 1], [WORLD_W, 0, -1, 1], [WORLD_W, WORLD_H, -1, -1], [0, WORLD_H, 1, -1]]) {
+      ctx.beginPath();
+      ctx.moveTo(x + dx * k, y);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x, y + dy * k);
+      ctx.stroke();
+    }
+    return;
+  }
+  ses.draw(ctx, { det: app.det, now });
+  app.effects.draw(ctx);
+  drawHud(ctx, ses.hud());
+  if (ses.state === 'won' || ses.state === 'over') {
+    const card = ses.endCard();
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 64px system-ui, sans-serif';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#000';
+    ctx.strokeText(card.title, WORLD_W / 2, WORLD_H / 2);
+    ctx.fillStyle = card.won ? '#ffd23f' : '#ff5a5a';
+    ctx.fillText(card.title, WORLD_W / 2, WORLD_H / 2);
+    ctx.restore();
+  }
+}
+
+// The projector window talks to this window through these.
+window.paperArcade = {
+  projectorReady(win, canvas) { projector.attach(win, canvas); },
+  tick,
+  keyDown(e) {
+    if (e.code === 'KeyF' && !e.repeat) {
+      const d = projector.win?.document;
+      if (d) (d.fullscreenElement ? d.exitFullscreen() : d.documentElement.requestFullscreen?.())?.catch?.(() => {});
+    }
+    onKeyDown(e);
+  },
+  keyUp(e) { input.keyUp(e.code); },
+  clearKeys() { input.clear(); },
+};
+window.addEventListener('pagehide', () => projector.close());
+
 // ---------------------------------------------------------------- main loop
 let last = performance.now();
 let acc = 0;
-function frame(now) {
+// One step of everything. Runs from this window's animation frames and from the
+// projector window's, so the game keeps going if either one is covered up.
+function tick() {
+  const now = performance.now();
+  if (now - last < 4) return;
   const dt = Math.min(100, now - last);
   last = now;
   if (app.source?.sizeChanged) cameraTurned();
@@ -1258,6 +1413,10 @@ function frame(now) {
     }
     drawScene(now);
   }
+  if (app.projMode) projector.render((ctx) => drawProjected(ctx, now));
+}
+function frame() {
+  tick();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -1265,3 +1424,4 @@ updateFixPanel();
 
 // For debugging in the browser console.
 window.gameApp = app;
+window.gameProjector = projector;

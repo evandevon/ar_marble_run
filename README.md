@@ -41,7 +41,7 @@ Print **[template.html](template.html)** (landscape, A4 or A3, black and white i
 ### Phones and tablets
 
 - **Touch controls** appear when you play. Put your left thumb anywhere on the left half of the screen and slide: the D-pad comes to your thumb, so there's nothing to find. Tap anywhere on the right half for the nearest button: **A** jumps and **B** runs. Up on the touch D-pad doesn't jump, because thumbs drift upwards while running. Turn the controls on or off under **Tune → Touch controls**.
-- **Zoom:** on touch screens, the view zooms in and follows the character, with a mini-map of the whole level in the corner. Press **🔍** (or **V**) to switch between zoomed and the whole level, on any screen. Build mode always shows the whole page. (Zoom won't apply to projector mode, where the picture has to line up with the paper.)
+- **Zoom:** on touch screens, the view zooms in and follows the character, with a mini-map of the whole level in the corner. Press **🔍** (or **V**) to switch between zoomed and the whole level, on any screen. Build mode always shows the whole page. (Zoom is off in projector mode, where the picture has to line up with the board.)
 - **Using the phone as the camera:** **Screen mode** goes full screen and holds the screen sideways, so it doesn't spin round while the phone points down. (Android only. On iPhone and iPad, turn on rotation lock.) In setup, **📸 Hold picture** freezes the preview so you can set the corners without keeping perfectly still. While building, **📸 Snap** takes a still picture of the drawing (and finds the level sheet's corners again if the phone moved); **🎥 Live** goes back to the camera.
 - Add the page to your home screen to play full screen.
 
@@ -60,6 +60,21 @@ No camera? Try the built-in demo level, or a photo of a drawing.
 7. Press **Start**. The setup is remembered for next time (**Use last setup**).
 
 Thick markers work best; pencil is ignored on purpose.
+
+## Projector mode
+
+The game is projected onto the whiteboard, right on top of the drawing: the ink is the level, and the character runs along it.
+
+1. Connect the projector and point it at the whiteboard. Extended or mirrored display both work.
+2. Mount the webcam so it sees the whole projected picture (it doesn't have to be straight above).
+3. Choose **Projector mode** and allow the camera. Set **Rotate** and **Flip** as in screen mode.
+4. Press **📽️ Open projector window**. Drag the new window onto the projector screen and click it to fill the screen (**F** toggles full screen; double-click to leave).
+5. Press **🎯 Line up**. The projector shows nine dots, one at a time, for about ten seconds. Keep the camera still and stand clear. The camera finds each dot and works out exactly where the projected picture lands, so no corner marks are needed.
+6. Press **Start**. While building, the projector shows only the edges of the play area (so it doesn't confuse the camera). Press Play and the character, coins and goal glow are projected onto the board.
+
+The main screen works as usual for the teacher: the camera view, Fix colours, Save level. Keys pressed with either window in front play the game.
+
+If the projector window changes size, or the camera or projector is bumped, press **⚙ Setup** and **Line up** again. Line up works best with the room lights a little dimmed.
 
 ## Class levels
 
@@ -112,6 +127,7 @@ The code is split into a shared core and one folder per game:
 | `js/core/vision.js` | Sorts every pixel into a marker colour (adjusting for uneven light), cleans edges, joins gaps |
 | `js/core/colours.js` | The marker colours, clean view and build-mode outlines |
 | `js/core/markers.js` | Finds the level sheet's corner squares |
+| `js/core/projector.js`, `projector.html` | Projector mode: the projector window and the automatic line-up |
 | `js/core/library.js` | Class levels saved in the browser (IndexedDB), export and import |
 | `js/core/importer.js` | Reads PDFs (pdf.js) and photos, crops and straightens each page |
 | `js/core/input.js`, `touch.js` | Keyboard, game controllers and the on-screen D-pad and A/B buttons, merged into one input |

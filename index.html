@@ -37,10 +37,10 @@
           <span class="mode-name">Class levels</span>
           <span class="mode-desc">Play saved levels, or add scanned drawings (PDF or photos).</span>
         </button>
-        <button class="mode-card" disabled aria-disabled="true">
+        <button class="mode-card" id="btn-projector">
           <span class="mode-icon" aria-hidden="true">📽️</span>
           <span class="mode-name">Projector mode</span>
-          <span class="mode-desc">Project the game onto the paper or whiteboard. <em>Coming later.</em></span>
+          <span class="mode-desc">Project the game onto the whiteboard, right on top of the drawing.</span>
         </button>
       </div>
 
@@ -72,7 +72,7 @@
         <label class="field">Camera
           <select id="camera-select"></select>
         </label>
-        <p class="hint">Point the camera straight down at the paper or whiteboard. Even light, no lamp right above.</p>
+        <p class="hint" id="camera-hint">Point the camera straight down at the paper or whiteboard. Even light, no lamp right above.</p>
         <div class="row orient" role="group" aria-label="Camera orientation">
           <button id="btn-rotate" class="secondary" title="Rotate 90°">⟳ Rotate</button>
           <button id="btn-fliph" class="secondary" aria-pressed="false" title="Mirror left–right">⇋ Flip</button>
@@ -87,7 +87,18 @@
         <p class="status" id="lock-status" role="status"></p>
       </div>
 
-      <div class="step">
+      <div class="step" id="step-projector" hidden>
+        <h3><span class="num">2</span> Projector</h3>
+        <p class="hint">Point the projector at the whiteboard. Then:</p>
+        <ol class="hint steps-list">
+          <li><button id="btn-proj-open" class="secondary">📽️ Open projector window</button><br>Drag it onto the projector screen and click it to fill the screen.</li>
+          <li>Make sure the camera can see the whole projected picture.</li>
+          <li><button id="btn-proj-lineup" class="secondary" disabled>🎯 Line up</button><br>The projector shows a few dots; keep the camera still and stand clear for a few seconds.</li>
+        </ol>
+        <p class="status" id="proj-status" role="status"></p>
+      </div>
+
+      <div class="step" id="step-corners">
         <h3><span class="num">2</span> Corners</h3>
         <p class="hint">Using the printed level sheet? Press <b>Find corner marks</b>. Otherwise click the four corners of the drawing area, in any order, and drag a dot to adjust it.</p>
         <p class="corner-count" id="corner-count" role="status">0 of 4 corners</p>
